@@ -12,7 +12,7 @@ export async function createProposal(signer: Signer, hub: string, options: Propo
   if (!options.snapshot) {
     options.snapshot = (await signer.provider?.getBlockNumber()) || 0;
   }
-  const proposal = {
+  const proposal: Proposal = {
     space: options.space,
     type: options.type,
     title: options.title,
@@ -23,7 +23,13 @@ export async function createProposal(signer: Signer, hub: string, options: Propo
     snapshot: options.snapshot,
     discussion: options.discussion || "",
     plugins: options.plugins || "",
+    app: options.app || "snapshot",
   };
+
+  // Only add timestamp if explicitly provided
+  if (options.timestamp !== undefined) {
+    proposal.timestamp = options.timestamp;
+  }
 
   if (!signer.provider) {
     throw new Error("Signer must have a provider to create a proposal.");
