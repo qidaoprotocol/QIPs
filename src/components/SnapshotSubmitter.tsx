@@ -8,24 +8,25 @@ import { useQuery } from "@tanstack/react-query";
 interface SnapshotSubmitterProps {
   frontmatter: any;
   html: string;
+  rawMarkdown: string;
 }
 
-const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({ frontmatter, html }) => {
+const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({ frontmatter, html, rawMarkdown }) => {
   const signer = useEthersSigner();
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<React.ReactNode>(null);
   const [highestQip, setHighestQip] = useState<number | null>(null);
 
-  const stripHtml = (html: string) => {
-    if (typeof window === "undefined") return "";
-    const tmp = document.createElement("DIV");
-    tmp.innerHTML = html;
-    return tmp.textContent || tmp.innerText || "";
+  const SNAPSHOT_SPACE = "qidao.eth";
+
+  const cleanMarkdown = (rawMarkdown: string) => {
+    // Remove frontmatter from the beginning of the markdown
+    return rawMarkdown.replace(/^---[\s\S]*?---\n?/, "").trim();
   };
 
   const { data: proposals, isLoading: loadingProposals } = useQuery({
-    queryKey: ["proposals", "qidao.eth"],
-    queryFn: () => getProposals("qidao.eth"),
+    queryKey: ["proposals", SNAPSHOT_SPACE],
+    queryFn: () => getProposals(SNAPSHOT_SPACE),
   });
 
   useEffect(() => {
@@ -60,8 +61,7 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({ frontmatter, html
   });
 
   const isQipValid = highestQip !== null && frontmatter.qip === highestQip + 1;
-
-  const space = "qidao.eth";
+  const space = SNAPSHOT_SPACE;
 
   const handleSubmit = async () => {
     if (!signer) {
@@ -84,7 +84,7 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({ frontmatter, html
         space,
         type: "basic",
         title: `QIP${frontmatter.qip}: ${frontmatter.title}`,
-        body: `QIP #${frontmatter.qip}: ${frontmatter.title}\n\n${stripHtml(html)}`,
+        body: cleanMarkdown(rawMarkdown),
         choices: ["For", "Against", "Abstain"],
         start: now + startOffset,
         end: now + endOffset,
@@ -98,7 +98,7 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({ frontmatter, html
       const receipt = await createProposal(signer, "https://hub.snapshot.org", proposalOptions);
       if (receipt && (receipt as any).id) {
         const proposalId = (receipt as any).id;
-        const proposalUrl = `https://snapshot.org/#/qidao.eth/proposal/${proposalId}`;
+        const proposalUrl = `https://snapshot.org/#/${space}/proposal/${proposalId}`;
         setStatus(
           <span>
             Proposal created successfully!

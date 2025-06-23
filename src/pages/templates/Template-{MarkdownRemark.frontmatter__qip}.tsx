@@ -12,7 +12,7 @@ interface Props {
 
 const Template: React.FC<Props> = ({ data }) => {
   const { markdownRemark } = data;
-  const { frontmatter, html } = markdownRemark;
+  const { frontmatter, html, rawMarkdownBody } = markdownRemark;
   const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
@@ -31,7 +31,7 @@ const Template: React.FC<Props> = ({ data }) => {
 
               <div className="mb-6 flex flex-col items-center">
                 {isClient ? (
-                  <SnapshotSubmitter frontmatter={frontmatter} html={html} />
+                  <SnapshotSubmitter frontmatter={frontmatter} html={html} rawMarkdown={rawMarkdownBody} />
                 ) : (
                   <div className="text-center p-4">Loading interactive module...</div>
                 )}
@@ -71,6 +71,7 @@ export const pageQuery = graphql`
         status
       }
       html
+      rawMarkdownBody
     }
   }
 `;

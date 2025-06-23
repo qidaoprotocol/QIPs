@@ -12,7 +12,7 @@ interface Props {
 
 const Template: React.FC<Props> = ({ data }) => {
   const { markdownRemark } = data;
-  const { frontmatter, html, fileAbsolutePath } = markdownRemark;
+  const { frontmatter, html, rawMarkdownBody, fileAbsolutePath } = markdownRemark;
   const githubLink = getGithubLink(fileAbsolutePath);
   const [isClient, setIsClient] = useState(false);
 
@@ -42,7 +42,7 @@ const Template: React.FC<Props> = ({ data }) => {
                 <span className="text-2xl font-bold text-black">Submit to Snapshot</span>
 
                 {isClient ? (
-                  <SnapshotSubmitter frontmatter={frontmatter} html={html} />
+                  <SnapshotSubmitter frontmatter={frontmatter} html={html} rawMarkdown={rawMarkdownBody} />
                 ) : (
                   <div className="text-center p-4">Loading interactive module...</div>
                 )}
@@ -75,6 +75,7 @@ export const pageQuery = graphql`
         status
       }
       html
+      rawMarkdownBody
     }
   }
 `;
