@@ -61,17 +61,32 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({ frontmatter, html
 
   const isQipValid = highestQip !== null && frontmatter.qip === highestQip + 1;
 
+  let startTime: number;
+  let endTime: number;
+
+  const createdTime = Math.floor(Date.now() / 1000);
+  const startOffset = 86400; // Exactly 1 day
+  const endOffset = 345600; // Exactly 4 days
+
+  startTime = createdTime + startOffset;
+  endTime = createdTime + endOffset;
+
+  console.log("Created time (now):", createdTime);
+  console.log("Start time:", startTime, `(+${startOffset}s = ${startOffset / 3600}h)`);
+  console.log("End time:", endTime, `(+${endOffset}s = ${endOffset / 86400}d)`);
+  console.log("Voting period:", endTime - startTime, "seconds =", (endTime - startTime) / 86400, "days");
+
   const proposalOptions: Proposal = {
     space: "qidao.eth",
     type: "single-choice",
     title: frontmatter.title,
     body: `QIP #${frontmatter.qip}: ${frontmatter.title}\n\n${stripHtml(html)}`,
     choices: ["Yes", "No", "Abstain"],
-    start: Math.floor(Date.now() / 1000) + 3600,
-    end: Math.floor(Date.now() / 1000) + 3600 + 86400,
+    start: startTime,
+    end: endTime,
     snapshot: 0,
     discussion: "",
-    plugins: "",
+    plugins: JSON.stringify({}),
   };
 
   const handleSubmit = async () => {
