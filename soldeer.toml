@@ -1,0 +1,5 @@
+[remappings]
+enabled = true
+
+[dependencies]
+"@forge-std" = { version = "1.9.5" }

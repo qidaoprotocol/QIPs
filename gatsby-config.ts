@@ -1,4 +1,16 @@
 import type { GatsbyConfig } from "gatsby";
+import dotenv from "dotenv";
+
+// Load environment variables from .env file
+dotenv.config({
+  path: `.env`,
+});
+
+console.log("📋 Gatsby Config - Environment Variables Check:");
+console.log("- GATSBY_QIP_REGISTRY_ADDRESS:", process.env.GATSBY_QIP_REGISTRY_ADDRESS);
+console.log("- GATSBY_USE_LOCAL_IPFS:", process.env.GATSBY_USE_LOCAL_IPFS);
+console.log("- GATSBY_PINATA_JWT:", process.env.GATSBY_PINATA_JWT ? "✅ Set" : "❌ Not set");
+console.log("- GATSBY_BASE_RPC_URL:", process.env.GATSBY_BASE_RPC_URL);
 
 const config: GatsbyConfig = {
   siteMetadata: {

@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(forge install:*)",
+      "Bash(./scripts/startAnvil.sh:*)",
+      "Bash(cp:*)",
+      "Bash(source .env)",
+      "Bash(forge script:*)",
+      "Bash(cast call:*)",
+      "Bash(cast code:*)",
+      "Bash(pkill:*)",
+      "Bash(find:*)",
+      "Bash(bun run:*)",
+      "Bash(chmod:*)",
+      "Bash(cat:*)",
+      "Bash(grep:*)",
+      "Bash(bun add:*)",
+      "WebFetch(domain:docs.pinata.cloud)",
+      "Bash(ipfs config:*)",
+      "Bash(curl:*)",
+      "Bash(forge clean:*)",
+      "Bash(forge build:*)",
+      "Bash(cast sig:*)",
+      "Bash(./scripts/start-local-dev.sh:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:snapshot.mirror.xyz)",
+      "Bash(lsof:*)"
+    ],
+    "deny": []
+  }
+}

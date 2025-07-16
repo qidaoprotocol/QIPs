@@ -13,7 +13,13 @@
     "build": "gatsby build",
     "serve": "gatsby serve",
     "clean": "gatsby clean",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "deploy:contracts": "forge script script/Deploy.s.sol --rpc-url $BASE_RPC_URL --broadcast",
+    "migrate:qips": "bun scripts/migrate-qips.ts",
+    "dev:local": "./scripts/start-local-dev.sh",
+    "dev:anvil": "./scripts/startAnvil.sh",
+    "dev:test-client": "bun run src/localQIPTest.ts",
+    "dev:deploy-only": "forge script script/DeployOnly.s.sol:DeployOnly --rpc-url http://localhost:8545 --broadcast"
   },
   "dependencies": {
     "@mdx-js/react": "^2.3.0",
@@ -49,6 +55,7 @@
     "@types/node": "^20.3.3",
     "@types/react": "^18.2.14",
     "@types/react-dom": "^18.2.6",
+    "dotenv": "^17.2.0",
     "typescript": "^5.1.6"
   }
 }

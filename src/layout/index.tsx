@@ -2,6 +2,7 @@ import React from 'react';
 import { useEffect } from 'react';
 import Navigation from '../components/Navigation';
 import Footer from '../components/Footer';
+import LocalModeBanner from '../components/LocalModeBanner';
 
 interface Props {
     children: React.ReactNode;
@@ -36,6 +37,7 @@ const Layout: React.FC<Props> = ({ children }) => {
 
     return (
         <main className="min-h-screen">
+            <LocalModeBanner />
             
             <header className="site-header h-20" role="banner">
                 <Navigation />

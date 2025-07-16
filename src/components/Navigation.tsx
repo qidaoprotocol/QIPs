@@ -6,8 +6,13 @@ const Navigation = () => {
   const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
+    console.log("🔍 Navigation Debug:");
+    console.log("- Setting isClient to true");
     setIsClient(true);
   }, []);
+  
+  console.log("- isClient:", isClient);
+  console.log("- ConnectKitButton will render:", isClient);
 
   return (
     <nav className="navbar bg-gray-200 w-full fixed top-0 p-4 flex justify-center items-center z-50">

@@ -62,12 +62,9 @@ export const pageQuery = graphql`
         title
         author
         network
-        type
         proposal
         implementor
-        release
         created
-        updated
         status
       }
       html

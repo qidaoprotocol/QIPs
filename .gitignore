@@ -6,3 +6,17 @@ gatsby-types.d.ts
 .DS_Store
 .idea
 .env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.development
+.env.test
+.env.production
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+broadcast/
+cache/
+out/

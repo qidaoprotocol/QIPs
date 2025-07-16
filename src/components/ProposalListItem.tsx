@@ -15,9 +15,36 @@ const statusColor:any = {
 const ProposalListItem = (props: any) => {
     const { proposals } = props;
 
+    // Helper function to get data from proposal (handles both markdown and blockchain structures)
+    const getProposalData = (proposal: any) => {
+        // Check if this is a blockchain QIP (has qipNumber) or markdown QIP (has frontmatter)
+        const isBlockchainQIP = proposal.qipNumber !== undefined;
+        
+        if (isBlockchainQIP) {
+            return {
+                qip: proposal.qipNumber,
+                title: proposal.title,
+                author: proposal.author,
+                status: proposal.status,
+                shortDescription: proposal.content?.substring(0, 200) || ''
+            };
+        } else {
+            // Markdown QIP structure
+            return {
+                qip: proposal.frontmatter?.qip,
+                title: proposal.frontmatter?.title,
+                author: proposal.frontmatter?.author,
+                status: proposal.frontmatter?.status,
+                shortDescription: proposal.frontmatter?.shortDescription || ''
+            };
+        }
+    };
+
     return (
         <div className="proposal-lists mb-15">
             {proposals.map((proposal: any, index: number) => {
+                const data = getProposalData(proposal);
+                
                 return (
                     <div
                         key={index}
@@ -41,22 +68,18 @@ const ProposalListItem = (props: any) => {
                                                             tabIndex={-1}
                                                         >
                                                             <Author
-                                                                author={
-                                                                    proposal
-                                                                        ?.frontmatter
-                                                                        ?.author
-                                                                }
+                                                                author={data.author}
                                                             />
                                                         </div>
                                                     </button>
                                                 </div>
                                             </div>
-                                            <span style={{backgroundColor: statusColor[proposal?.frontmatter?.status]}} className="bg-[#BB6BD9] State text-white p-[1px] px-[7px] rounded-[14px] font-normal">
-                                                {proposal?.frontmatter?.status}
+                                            <span style={{backgroundColor: statusColor[data.status]}} className="bg-[#BB6BD9] State text-white p-[1px] px-[7px] rounded-[14px] font-normal">
+                                                {data.status}
                                             </span>
                                         </div>
                                         <a
-                                            href={`/qips/QIP-${proposal.frontmatter.qip}`}
+                                            href={`/qips/QIP-${data.qip}`}
                                             className="cursor-pointer"
                                         >
                                             <div className="relative flex mb-1 mt-3 break-words pr-[80px] leading-[32px]">
@@ -66,19 +89,13 @@ const ProposalListItem = (props: any) => {
 
                                                 <h3 className="inline pr-2">
                                                     QIP{' '}
-                                                    {proposal?.frontmatter?.qip}
+                                                    {data.qip}
                                                     :{' '}
-                                                    {
-                                                        proposal?.frontmatter
-                                                            ?.title
-                                                    }
+                                                    {data.title}
                                                 </h3>
                                             </div>
                                             <p className="line-clamp-2 break-words text-md font-semibold">
-                                                {
-                                                    proposal?.frontmatter
-                                                        ?.shortDescription
-                                                }
+                                                {data.shortDescription}
                                             </p>
                                             {/* Add more nested elements here */}
                                         </a>
