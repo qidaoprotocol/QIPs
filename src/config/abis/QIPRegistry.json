@@ -1,0 +1,104 @@
+[
+  {
+    "inputs": [
+      { "name": "_title", "type": "string" },
+      { "name": "_network", "type": "string" },
+      { "name": "_contentHash", "type": "bytes32" },
+      { "name": "_ipfsUrl", "type": "string" }
+    ],
+    "name": "createQIP",
+    "outputs": [{ "name": "", "type": "uint256" }],
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "name": "_qipNumber", "type": "uint256" },
+      { "name": "_title", "type": "string" },
+      { "name": "_newContentHash", "type": "bytes32" },
+      { "name": "_newIpfsUrl", "type": "string" },
+      { "name": "_changeNote", "type": "string" }
+    ],
+    "name": "updateQIP",
+    "outputs": [],
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "name": "_qipNumber", "type": "uint256" },
+      { "name": "_snapshotProposalId", "type": "string" }
+    ],
+    "name": "linkSnapshotProposal",
+    "outputs": [],
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "name": "_qipNumber", "type": "uint256" },
+      { "name": "_content", "type": "string" }
+    ],
+    "name": "verifyContent",
+    "outputs": [{ "name": "", "type": "bool" }],
+    "type": "function",
+    "stateMutability": "view"
+  },
+  {
+    "inputs": [{ "name": "_qipNumber", "type": "uint256" }],
+    "name": "qips",
+    "outputs": [
+      { "name": "qipNumber", "type": "uint256" },
+      { "name": "author", "type": "address" },
+      { "name": "title", "type": "string" },
+      { "name": "network", "type": "string" },
+      { "name": "contentHash", "type": "bytes32" },
+      { "name": "ipfsUrl", "type": "string" },
+      { "name": "createdAt", "type": "uint256" },
+      { "name": "lastUpdated", "type": "uint256" },
+      { "name": "status", "type": "uint8" },
+      { "name": "implementor", "type": "string" },
+      { "name": "implementationDate", "type": "uint256" },
+      { "name": "snapshotProposalId", "type": "string" },
+      { "name": "version", "type": "uint256" }
+    ],
+    "type": "function",
+    "stateMutability": "view"
+  },
+  {
+    "inputs": [{ "name": "_status", "type": "uint8" }],
+    "name": "getQIPsByStatus",
+    "outputs": [{ "name": "", "type": "uint256[]" }],
+    "type": "function",
+    "stateMutability": "view"
+  },
+  {
+    "inputs": [{ "name": "_author", "type": "address" }],
+    "name": "getQIPsByAuthor",
+    "outputs": [{ "name": "", "type": "uint256[]" }],
+    "type": "function",
+    "stateMutability": "view"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "name": "qipNumber", "type": "uint256" },
+      { "indexed": true, "name": "author", "type": "address" },
+      { "indexed": false, "name": "title", "type": "string" },
+      { "indexed": false, "name": "network", "type": "string" },
+      { "indexed": false, "name": "contentHash", "type": "bytes32" },
+      { "indexed": false, "name": "ipfsUrl", "type": "string" }
+    ],
+    "name": "QIPCreated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "name": "qipNumber", "type": "uint256" },
+      { "indexed": false, "name": "version", "type": "uint256" },
+      { "indexed": false, "name": "newContentHash", "type": "bytes32" },
+      { "indexed": false, "name": "newIpfsUrl", "type": "string" },
+      { "indexed": false, "name": "changeNote", "type": "string" }
+    ],
+    "name": "QIPUpdated",
+    "type": "event"
+  }
+]

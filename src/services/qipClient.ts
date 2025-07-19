@@ -148,7 +148,6 @@ export interface QIP {
 
 export class QIPClient {
   private publicClient: PublicClient;
-  private walletClient?: WalletClient;
   private contractAddress: Address;
 
   constructor(
@@ -186,9 +185,6 @@ export class QIPClient {
     console.log("- PublicClient created:", !!this.publicClient);
   }
 
-  setWalletClient(walletClient: WalletClient) {
-    this.walletClient = walletClient;
-  }
 
   /**
    * Check if running in local development
@@ -203,12 +199,13 @@ export class QIPClient {
    * Create a new QIP
    */
   async createQIP(
+    walletClient: WalletClient,
     title: string,
     network: string,
     contentHash: Hash,
     ipfsUrl: string
   ): Promise<{ hash: Hash; qipNumber: bigint }> {
-    if (!this.walletClient) throw new Error("Wallet client not set");
+    if (!walletClient?.account) throw new Error("Wallet client with account required");
     
     // First estimate gas
     const estimatedGas = await this.publicClient.estimateContractGas({
@@ -216,7 +213,7 @@ export class QIPClient {
       abi: QIP_REGISTRY_ABI,
       functionName: 'createQIP',
       args: [title, network, contentHash, ipfsUrl],
-      account: this.walletClient.account!
+      account: walletClient.account
     });
     
     const { request } = await this.publicClient.simulateContract({
@@ -224,12 +221,12 @@ export class QIPClient {
       abi: QIP_REGISTRY_ABI,
       functionName: 'createQIP',
       args: [title, network, contentHash, ipfsUrl],
-      account: this.walletClient.account!,
+      account: walletClient.account,
       gas: estimatedGas * 120n / 100n // Add 20% buffer
     });
 
     console.log('📝 Writing contract transaction...');
-    const hash = await this.walletClient.writeContract(request);
+    const hash = await walletClient.writeContract(request);
     console.log('✅ Transaction submitted:', hash);
     
     // Wait for transaction and get QIP number from logs
@@ -302,13 +299,14 @@ export class QIPClient {
    * Update an existing QIP
    */
   async updateQIP(
+    walletClient: WalletClient,
     qipNumber: bigint,
     title: string,
     newContentHash: Hash,
     newIpfsUrl: string,
     changeNote: string
   ): Promise<Hash> {
-    if (!this.walletClient) throw new Error("Wallet client not set");
+    if (!walletClient?.account) throw new Error("Wallet client with account required");
     
     // First estimate gas
     const estimatedGas = await this.publicClient.estimateContractGas({
@@ -316,7 +314,7 @@ export class QIPClient {
       abi: QIP_REGISTRY_ABI,
       functionName: 'updateQIP',
       args: [qipNumber, title, newContentHash, newIpfsUrl, changeNote],
-      account: this.walletClient.account!
+      account: walletClient.account
     });
     
     const { request } = await this.publicClient.simulateContract({
@@ -324,21 +322,22 @@ export class QIPClient {
       abi: QIP_REGISTRY_ABI,
       functionName: 'updateQIP',
       args: [qipNumber, title, newContentHash, newIpfsUrl, changeNote],
-      account: this.walletClient.account!,
+      account: walletClient.account,
       gas: estimatedGas * 120n / 100n // Add 20% buffer
     });
 
-    return await this.walletClient.writeContract(request);
+    return await walletClient.writeContract(request);
   }
 
   /**
    * Link a Snapshot proposal to a QIP
    */
   async linkSnapshotProposal(
+    walletClient: WalletClient,
     qipNumber: bigint,
     snapshotProposalId: string
   ): Promise<Hash> {
-    if (!this.walletClient) throw new Error("Wallet client not set");
+    if (!walletClient?.account) throw new Error("Wallet client with account required");
     
     // First estimate gas
     const estimatedGas = await this.publicClient.estimateContractGas({
@@ -346,7 +345,7 @@ export class QIPClient {
       abi: QIP_REGISTRY_ABI,
       functionName: 'linkSnapshotProposal',
       args: [qipNumber, snapshotProposalId],
-      account: this.walletClient.account!
+      account: walletClient.account
     });
     
     const { request } = await this.publicClient.simulateContract({
@@ -354,11 +353,11 @@ export class QIPClient {
       abi: QIP_REGISTRY_ABI,
       functionName: 'linkSnapshotProposal',
       args: [qipNumber, snapshotProposalId],
-      account: this.walletClient.account!,
+      account: walletClient.account,
       gas: estimatedGas * 120n / 100n // Add 20% buffer
     });
 
-    return await this.walletClient.writeContract(request);
+    return await walletClient.writeContract(request);
   }
 
   /**
@@ -519,5 +518,69 @@ ${qipData.content}`;
     };
     
     return statusMap[status] || 'Unknown';
+  }
+
+  /**
+   * Helper method to create QIP from QIPContent
+   */
+  async createQIPFromContent(
+    walletClient: WalletClient,
+    content: QIPContent,
+    ipfsUrl: string
+  ): Promise<{ qipNumber: bigint; transactionHash: string }> {
+    const contentHash = keccak256(toBytes(content.content));
+    const result = await this.createQIP(
+      walletClient,
+      content.title,
+      content.network,
+      contentHash,
+      ipfsUrl
+    );
+    
+    return {
+      qipNumber: result.qipNumber,
+      transactionHash: result.hash
+    };
+  }
+
+  /**
+   * Helper method to update QIP from QIPContent
+   */
+  async updateQIPFromContent(
+    walletClient: WalletClient,
+    qipNumber: bigint,
+    content: QIPContent,
+    ipfsUrl: string
+  ): Promise<{ version: bigint; transactionHash: string }> {
+    const contentHash = keccak256(toBytes(content.content));
+    const hash = await this.updateQIP(
+      walletClient,
+      qipNumber,
+      content.title,
+      contentHash,
+      ipfsUrl,
+      'Updated via QIP Editor'
+    );
+
+    // Get the updated QIP to return the new version
+    const updatedQIP = await this.getQIP(qipNumber);
+    
+    return {
+      version: updatedQIP.version,
+      transactionHash: hash
+    };
+  }
+
+  /**
+   * Update QIP status
+   */
+  async updateQIPStatus(
+    walletClient: WalletClient,
+    qipNumber: bigint,
+    newStatus: QIPStatus
+  ): Promise<Hash> {
+    // This would require adding the updateStatus function to the ABI
+    // For now, throw an error indicating it's not implemented
+    throw new Error('updateQIPStatus not yet implemented in smart contract');
   }
 }

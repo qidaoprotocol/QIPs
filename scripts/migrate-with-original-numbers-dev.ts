@@ -118,7 +118,8 @@ async function migrateQIP(
   qipNumber: number,
   filePath: string,
   ipfsService: IPFSService,
-  qipClient: QIPClient
+  qipClient: QIPClient,
+  walletClient: any
 ): Promise<{ success: boolean; cid?: string; error?: string }> {
   try {
     console.log(`📄 Processing QIP-${qipNumber}...`);
@@ -199,11 +200,7 @@ async function migrateQIP(
       // Use a default author address for migration
       const authorAddress = '0x0000000000000000000000000000000000000001' as Address;
       
-      // Get wallet client from qipClient
-      const walletClient = (qipClient as any).walletClient;
-      if (!walletClient) {
-        throw new Error('Wallet client not initialized');
-      }
+      // Wallet client is now passed as parameter
       
       const hash = await walletClient.writeContract({
         address: CONFIG.registryAddress,
@@ -268,6 +265,8 @@ async function main() {
   );
   
   // For blockchain transactions, we need to set up a wallet client
+  let walletClient: any = null;
+  
   if (!CONFIG.dryRun) {
     console.log('🔑 Setting up wallet client for blockchain transactions...');
     
@@ -275,19 +274,18 @@ async function main() {
     // This account is the deployer and has editor permissions by default
     const privateKey = process.env.PRIVATE_KEY as `0x${string}` || '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
     
-      try {
-        // Create wallet client using viem
-        const { createWalletClient, createPublicClient, http } = await import('viem');
-        const { privateKeyToAccount } = await import('viem/accounts');
-        const { base } = await import('viem/chains');      
+    try {
+      // Create wallet client using viem
+      const { createWalletClient, createPublicClient, http } = await import('viem');
+      const { privateKeyToAccount } = await import('viem/accounts');
+      const { base } = await import('viem/chains');      
       const account = privateKeyToAccount(privateKey);
-      const walletClient = createWalletClient({
+      walletClient = createWalletClient({
         account,
         chain: base,
         transport: http(CONFIG.rpcUrl)
       });
       
-      qipClient.setWalletClient(walletClient);
       console.log('✅ Wallet client connected with address:', account.address);
       
       // Check if the account has editor role
@@ -349,7 +347,7 @@ async function main() {
     const qipNumber = extractQIPNumber(file);
     if (qipNumber) {
       const filePath = join(CONFIG.qipDir, file);
-      const result = await migrateQIP(qipNumber, filePath, ipfsService, qipClient);
+      const result = await migrateQIP(qipNumber, filePath, ipfsService, qipClient, walletClient);
       results.push({ qipNumber, ...result });
     }
   }

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useEthersSigner } from "../utils/ethers";
-import { createProposal, getProposals } from "../utils/snapshot-client";
+import { createProposal, getProposals } from "../utils/snapshotClient";
 import { Proposal } from "@snapshot-labs/snapshot.js/dist/src/sign/types";
 import { ethers } from "ethers";
 import { useQuery } from "@tanstack/react-query";

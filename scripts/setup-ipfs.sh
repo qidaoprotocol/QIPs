@@ -48,7 +48,7 @@ echo -e "${YELLOW}Configuring IPFS for QIPs development...${NC}"
 
 # CORS configuration for browser access
 echo -e "${BLUE}Setting up CORS headers...${NC}"
-ipfs config --json API.HTTPHeaders.Access-Control-Allow-Origin '["http://localhost:8000", "http://localhost:8080", "*"]'
+ipfs config --json API.HTTPHeaders.Access-Control-Allow-Origin '["http://localhost:3000", "http://localhost:8080", "http://127.0.0.1:3000", "*"]'
 ipfs config --json API.HTTPHeaders.Access-Control-Allow-Methods '["GET", "POST", "PUT", "DELETE"]'
 ipfs config --json API.HTTPHeaders.Access-Control-Allow-Headers '["Content-Type", "Authorization"]'
 ipfs config --json API.HTTPHeaders.Access-Control-Allow-Credentials '["true"]'

@@ -5,6 +5,7 @@ import SnapshotSubmitter from "../../components/SnapshotSubmitter";
 import { useAccount } from 'wagmi';
 import { Link } from 'gatsby';
 import { useQIPData } from '../../hooks/useQIPData';
+import { config } from '../../config';
 
 interface Props {
   params?: {
@@ -32,10 +33,10 @@ const DynamicQIPPage: React.FC<Props> = ({ params, location }) => {
     error, 
     invalidateQIPs 
   } = useQIPData({
-    registryAddress: process.env.GATSBY_QIP_REGISTRY_ADDRESS as `0x${string}`,
-    pinataJwt: process.env.GATSBY_PINATA_JWT,
-    pinataGateway: process.env.GATSBY_PINATA_GATEWAY,
-    useLocalIPFS: process.env.GATSBY_USE_LOCAL_IPFS === 'true',
+    registryAddress: config.qipRegistryAddress,
+    pinataJwt: config.pinataJwt,
+    pinataGateway: config.pinataGateway,
+    useLocalIPFS: config.useLocalIPFS,
   });
   
   const qip = blockchainQIPs.find((q: any) => q.qipNumber === qipNumber);

@@ -18,8 +18,11 @@
     "migrate:local-ipfs-dev": "bun run scripts/migrate-to-local-ipfs-dev.ts",
     "migrate:original-numbers-dev": "bun run scripts/migrate-with-original-numbers-dev.ts",
     "migrate:local-ipfs:dry": "bun run scripts/migrate-to-local-ipfs.ts --dry-run",
-    "dev:local": "./scripts/start-local-dev-vite.sh",
-    "dev:help": "echo 'Local Development Commands:\\n  npm run dev:local - Start full local environment (IPFS + Anvil + Gatsby)\\n  npm run migrate:local-ipfs-dev - Upload QIPs to local IPFS (dev only)\\n  npm run migrate:original-numbers-dev - Migrate QIPs 209-248 with original numbers (dev only)'",
+    "dev:local": "./scripts/start-local-dev.sh",
+    "develop": "vite",
+    "start": "vite",
+    "serve": "vite preview",
+    "dev:help": "echo 'Local Development Commands:\\n  npm run dev:local - Start full local environment (IPFS + Anvil + Vite)\\n  npm run migrate:local-ipfs-dev - Upload QIPs to local IPFS (dev only)\\n  npm run migrate:original-numbers-dev - Migrate QIPs 209-248 with original numbers (dev only)'",
     "dev:anvil": "./scripts/startAnvil.sh",
     "dev:test-client": "bun run src/localQIPTest.ts",
     "dev:deploy-only": "forge script script/DeployOnly.s.sol:DeployOnly --rpc-url http://localhost:8545 --broadcast",
@@ -27,7 +30,7 @@
     "ipfs:check": "./scripts/check-ipfs.sh",
     "ipfs:seed": "bun run ./scripts/seed-ipfs-test-data.ts",
     "predev:local": "bun run ipfs:check",
-    "dev:with-ipfs": "USE_LOCAL_IPFS=true bun run develop"
+    "dev:with-ipfs": "USE_LOCAL_IPFS=true bun run dev"
   },
   "dependencies": {
     "@mdx-js/react": "^2.3.0",

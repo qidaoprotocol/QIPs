@@ -91,10 +91,9 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
   }, [saving, success, error]);
 
   useEffect(() => {
-    if (registryAddress && walletClient) {
+    if (registryAddress) {
       console.log('🔧 Initializing QIPClient with RPC:', rpcUrl || 'http://localhost:8545');
       const client = new QIPClient(registryAddress, rpcUrl || 'http://localhost:8545');
-      client.setWalletClient(walletClient);
       setQipClient(client);
     }
 
@@ -114,7 +113,7 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
     e.preventDefault();
     console.log('📝 Form submission started');
     
-    if (!qipClient || !ipfsService || !address) {
+    if (!qipClient || !ipfsService || !address || !walletClient) {
       setError('Please connect your wallet');
       console.error('❌ Missing required services:', { qipClient: !!qipClient, ipfsService: !!ipfsService, address });
       return;
@@ -148,6 +147,7 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
       if (existingQIP) {
         // Update existing QIP
         const tx = await qipClient.updateQIP(
+          walletClient,
           existingQIP.qipNumber,
           title,
           contentHash,
@@ -160,6 +160,7 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
         // Create new QIP
         console.log('🚀 Creating new QIP on blockchain...');
         const { hash, qipNumber } = await qipClient.createQIP(
+          walletClient,
           title,
           network,
           contentHash,
@@ -201,7 +202,7 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
       setSaving(false);
       console.log('✅ Saving state set to false');
     }
-  }, [qipClient, ipfsService, address, title, network, content, implementor, existingQIP]);
+  }, [qipClient, ipfsService, address, walletClient, title, network, content, implementor, existingQIP]);
 
   const handlePreview = () => {
     setPreview(!preview);

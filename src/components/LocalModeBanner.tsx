@@ -1,9 +1,8 @@
 import React from 'react';
+import { config } from '../config';
 
 const LocalModeBanner: React.FC = () => {
-  const isLocalMode = process.env.GATSBY_LOCAL_MODE === 'true';
-  
-  if (!isLocalMode || typeof window === 'undefined') {
+  if (!config.localMode || typeof window === 'undefined') {
     return null;
   }
 

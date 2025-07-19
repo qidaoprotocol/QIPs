@@ -206,9 +206,9 @@ export class IPFSService {
   }
 
   /**
-   * Upload QIP content to IPFS
+   * Upload QIP content to IPFS from structured data
    */
-  async uploadQIP(qipContent: QIPContent): Promise<{
+  async uploadQIPFromContent(qipContent: QIPContent): Promise<{
     cid: string;
     ipfsUrl: string;
     contentHash: Hash;
@@ -288,6 +288,32 @@ ${qipData.content}`;
       : cidOrUrl;
     
     return await this.provider.fetch(cid);
+  }
+
+  /**
+   * Upload pre-formatted QIP markdown content with metadata
+   */
+  async uploadQIP(markdownContent: string, metadata?: {
+    name?: string;
+    qipNumber?: string;
+    title?: string;
+    author?: string;
+    version?: string;
+  }): Promise<string> {
+    // Upload to IPFS
+    const cid = await this.provider.upload(markdownContent);
+    return `ipfs://${cid}`;
+  }
+
+  /**
+   * Generate QIP markdown from frontmatter and content
+   */
+  generateQIPMarkdown(frontmatter: Record<string, any>, content: string): string {
+    const frontmatterLines = Object.entries(frontmatter)
+      .map(([key, value]) => `${key}: ${value}`)
+      .join('\n');
+    
+    return `---\n${frontmatterLines}\n---\n\n${content}`;
   }
 
   /**

@@ -1,52 +1,49 @@
 import React, { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { useQIPData } from '../hooks/useQIPData'
+import { useAccount } from 'wagmi'
+import { useQIP } from '../hooks/useQIP'
 import Layout from '../layout'
 import FrontmatterTable from '../components/FrontmatterTable'
+import SnapshotSubmitter from '../components/SnapshotSubmitter'
 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 const QIPDetail: React.FC = () => {
   const { qipNumber } = useParams<{ qipNumber: string }>()
-  const [qipData, setQipData] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const { address } = useAccount()
+  const [isClient, setIsClient] = useState(false)
+  const [canEdit, setCanEdit] = useState(false)
 
-  const { getQIP } = useQIPData({
-    registryAddress: process.env.GATSBY_QIP_REGISTRY_ADDRESS as `0x${string}`,
-    useLocalIPFS: process.env.GATSBY_USE_LOCAL_IPFS === 'true',
-    pinataJwt: process.env.GATSBY_PINATA_JWT || '',
-    pinataGateway: process.env.GATSBY_PINATA_GATEWAY || 'https://gateway.pinata.cloud',
-    localIPFSApi: process.env.GATSBY_LOCAL_IPFS_API || 'http://localhost:5001',
-    localIPFSGateway: process.env.GATSBY_LOCAL_IPFS_GATEWAY || 'http://localhost:8080',
-    enabled: !!process.env.GATSBY_QIP_REGISTRY_ADDRESS
+  // Extract number from QIP-XXX format
+  const qipNumberParsed = qipNumber?.replace('QIP-', '') || '0'
+
+  // Use Vite env vars
+  const registryAddress = (import.meta.env.VITE_QIP_REGISTRY_ADDRESS || process.env.GATSBY_QIP_REGISTRY_ADDRESS) as `0x${string}`
+  const useLocalIPFS = (import.meta.env.VITE_USE_LOCAL_IPFS || process.env.GATSBY_USE_LOCAL_IPFS) === 'true'
+  const pinataJwt = import.meta.env.VITE_PINATA_JWT || process.env.GATSBY_PINATA_JWT || ''
+  const pinataGateway = import.meta.env.VITE_PINATA_GATEWAY || process.env.GATSBY_PINATA_GATEWAY || 'https://gateway.pinata.cloud'
+  const rpcUrl = import.meta.env.VITE_BASE_RPC_URL || process.env.GATSBY_BASE_RPC_URL || 'http://localhost:8545'
+
+  const { data: qipData, isLoading: loading, error } = useQIP({
+    registryAddress,
+    qipNumber: parseInt(qipNumberParsed),
+    useLocalIPFS,
+    pinataJwt,
+    pinataGateway,
+    rpcUrl,
+    enabled: !!registryAddress && !!qipNumber
   })
 
   useEffect(() => {
-    const fetchQIP = async () => {
-      if (!qipNumber) return
+    setIsClient(true)
+  }, [])
 
-      try {
-        setLoading(true)
-        const qipQuery = getQIP(parseInt(qipNumber))
-        const result = await qipQuery.refetch()
-        
-        if (result.data) {
-          setQipData(result.data)
-        } else {
-          setError('QIP not found')
-        }
-      } catch (err) {
-        console.error('Error fetching QIP:', err)
-        setError('Failed to load QIP')
-      } finally {
-        setLoading(false)
-      }
+  useEffect(() => {
+    if (address && qipData && qipData.author.toLowerCase() === address.toLowerCase()) {
+      setCanEdit(true)
     }
-
-    fetchQIP()
-  }, [qipNumber, getQIP])
+  }, [address, qipData])
 
   if (loading) {
     return (
@@ -140,11 +137,52 @@ const QIPDetail: React.FC = () => {
             </ReactMarkdown>
           </div>
 
-          {qipData.version > 1 && (
-            <div className="mt-8 p-4 bg-gray-100 rounded">
+          {/* Version and edit info */}
+          <div className="mt-8 p-4 bg-gray-100 rounded">
+            <div className="flex justify-between items-center">
               <p className="text-sm text-gray-600">
-                This QIP has been updated {qipData.version - 1} time{qipData.version > 2 ? 's' : ''}.
+                Version {qipData.version}
+                {qipData.version > 1 && ` • Updated ${qipData.version - 1} time${qipData.version > 2 ? 's' : ''}`}
               </p>
+              {canEdit && qipData.status === 'Draft' && (
+                <Link 
+                  to={`/edit-proposal?qip=${qipData.qipNumber}`}
+                  className="text-indigo-600 hover:text-indigo-800 text-sm font-medium"
+                >
+                  Edit Proposal
+                </Link>
+              )}
+            </div>
+          </div>
+
+          {/* Snapshot submission for eligible statuses */}
+          {(qipData.status === 'Review' || qipData.status === 'Vote') && !qipData.proposal && qipData.proposal !== 'None' && (
+            <div className="mt-8 border-t pt-8">
+              <h2 className="text-2xl font-bold mb-4">Submit to Snapshot</h2>
+              {isClient ? (
+                <SnapshotSubmitter 
+                  frontmatter={frontmatter} 
+                  html={`<div>${qipData.content}</div>`}
+                  rawMarkdown={qipData.content} 
+                />
+              ) : (
+                <div className="text-center p-4">Loading interactive module...</div>
+              )}
+            </div>
+          )}
+
+          {/* Show existing Snapshot proposal link */}
+          {qipData.proposal && qipData.proposal !== 'None' && (
+            <div className="mt-8 p-4 bg-blue-50 rounded">
+              <h3 className="font-bold mb-2">Snapshot Proposal</h3>
+              <a 
+                href={qipData.proposal.startsWith('http') ? qipData.proposal : `https://snapshot.org/#/${qipData.proposal}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-600 hover:underline"
+              >
+                View on Snapshot →
+              </a>
             </div>
           )}
         </div>

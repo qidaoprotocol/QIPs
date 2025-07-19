@@ -25,7 +25,7 @@ for arg in "$@"; do
     esac
 done
 
-echo -e "${BLUE}🚀 Starting QIPs Local Development Environment${NC}"
+echo -e "${BLUE}🚀 Starting QIPs Local Development Environment (Vite)${NC}"
 echo "================================================"
 
 # Function to cleanup on exit
@@ -35,9 +35,9 @@ cleanup() {
         kill $ANVIL_PID 2>/dev/null
         echo "Stopped Anvil (PID: $ANVIL_PID)"
     fi
-    if [ ! -z "$GATSBY_PID" ]; then
-        kill $GATSBY_PID 2>/dev/null
-        echo "Stopped Gatsby (PID: $GATSBY_PID)"
+    if [ ! -z "$VITE_PID" ]; then
+        kill $VITE_PID 2>/dev/null
+        echo "Stopped Vite (PID: $VITE_PID)"
     fi
     if [ ! -z "$IPFS_PID" ]; then
         kill $IPFS_PID 2>/dev/null
@@ -70,10 +70,10 @@ if [ -f .env.local ]; then
     export $(grep -v '^#' .env.local | xargs)
 fi
 
-# Kill any existing Anvil/Gatsby processes
+# Kill any existing Anvil/Vite processes
 echo -e "${YELLOW}Stopping any existing processes...${NC}"
 pkill -f anvil 2>/dev/null
-pkill -f gatsby 2>/dev/null
+pkill -f vite 2>/dev/null
 sleep 2
 
 # Check if IPFS should be started
@@ -104,7 +104,7 @@ if [ "$USE_LOCAL_IPFS" = "true" ]; then
     
     # Configure IPFS for local development
     echo -e "${YELLOW}Configuring IPFS for local development...${NC}"
-    ipfs config --json API.HTTPHeaders.Access-Control-Allow-Origin '["http://localhost:8000", "http://localhost:8080", "*"]' 2>/dev/null
+    ipfs config --json API.HTTPHeaders.Access-Control-Allow-Origin '["http://localhost:3000", "http://localhost:8080", "http://127.0.0.1:3000", "*"]' 2>/dev/null
     ipfs config --json API.HTTPHeaders.Access-Control-Allow-Methods '["GET", "POST", "PUT", "DELETE"]' 2>/dev/null
     ipfs config --json API.HTTPHeaders.Access-Control-Allow-Headers '["Content-Type", "Authorization"]' 2>/dev/null
     ipfs config --json API.HTTPHeaders.Access-Control-Allow-Credentials '["true"]' 2>/dev/null
@@ -188,9 +188,24 @@ else
     exit 1
 fi
 
-# Use local env file
+# Load environment variables
 echo -e "${GREEN}Loading local environment...${NC}"
-cp .env.local .env
+if [ -f .env.local ]; then
+    # Export both VITE_ and GATSBY_ prefixes for compatibility
+    while IFS='=' read -r key value; do
+        # Skip comments and empty lines
+        [[ $key =~ ^#.*$ ]] || [[ -z $key ]] && continue
+        
+        # Export original variable
+        export "$key=$value"
+        
+        # If it's a GATSBY_ variable, also export as VITE_
+        if [[ $key == GATSBY_* ]]; then
+            VITE_KEY="VITE_${key#GATSBY_}"
+            export "$VITE_KEY=$value"
+        fi
+    done < .env.local
+fi
 
 # Install forge-std if needed
 if [ ! -d "dependencies/forge-std" ]; then
@@ -280,6 +295,11 @@ if [ "$MIGRATE_QIPS" = true ]; then
     export GATSBY_BASE_RPC_URL="http://localhost:8545"
     export GATSBY_LOCAL_IPFS_API="http://localhost:5001"
     export GATSBY_LOCAL_IPFS_GATEWAY="http://localhost:8080"
+    # Also export as VITE_ for compatibility
+    export VITE_QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS
+    export VITE_BASE_RPC_URL="http://localhost:8545"
+    export VITE_LOCAL_IPFS_API="http://localhost:5001"
+    export VITE_LOCAL_IPFS_GATEWAY="http://localhost:8080"
     # Use the governance/deployer account private key (has editor permissions by default)
     export PRIVATE_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
     
@@ -293,30 +313,31 @@ if [ "$MIGRATE_QIPS" = true ]; then
     fi
 fi
 
-# Clean Gatsby cache
-echo -e "\n${GREEN}4. Cleaning Gatsby cache...${NC}"
-bun run clean
+# Start Vite in development mode
+echo -e "\n${GREEN}4. Starting Vite development server...${NC}"
+# Export registry address for Vite
+export VITE_QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS
+export GATSBY_QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS
+bun run dev &
+VITE_PID=$!
+echo "Vite PID: $VITE_PID"
 
-# Start Gatsby in development mode
-echo -e "\n${GREEN}5. Starting Gatsby development server...${NC}"
-GATSBY_ENV=development bun run develop &
-GATSBY_PID=$!
-echo "Gatsby PID: $GATSBY_PID"
-
-# Wait for Gatsby to start
-echo -e "${YELLOW}Waiting for Gatsby to start (this may take a minute)...${NC}"
-MAX_GATSBY_RETRIES=60
-GATSBY_RETRY_COUNT=0
-while [ $GATSBY_RETRY_COUNT -lt $MAX_GATSBY_RETRIES ]; do
-    if curl -s http://localhost:8000 > /dev/null 2>&1; then
+# Wait for Vite to start
+echo -e "${YELLOW}Waiting for Vite to start...${NC}"
+MAX_VITE_RETRIES=30
+VITE_RETRY_COUNT=0
+while [ $VITE_RETRY_COUNT -lt $MAX_VITE_RETRIES ]; do
+    if curl -s http://localhost:3000 > /dev/null 2>&1; then
         break
     fi
-    GATSBY_RETRY_COUNT=$((GATSBY_RETRY_COUNT + 1))
+    VITE_RETRY_COUNT=$((VITE_RETRY_COUNT + 1))
     sleep 2
+    echo -n "."
 done
+echo ""
 
-if [ $GATSBY_RETRY_COUNT -eq $MAX_GATSBY_RETRIES ]; then
-    echo -e "${RED}❌ Gatsby failed to start${NC}"
+if [ $VITE_RETRY_COUNT -eq $MAX_VITE_RETRIES ]; then
+    echo -e "${RED}❌ Vite failed to start${NC}"
     exit 1
 fi
 
@@ -325,8 +346,7 @@ echo -e "\n${GREEN}✅ Local Development Environment Ready!${NC}"
 echo "================================================"
 echo -e "${BLUE}📋 Services Running:${NC}"
 echo "- Anvil (Blockchain): http://localhost:8545"
-echo "- Gatsby (Frontend): http://localhost:8000"
-echo "- GraphQL Explorer: http://localhost:8000/___graphql"
+echo "- Vite (Frontend): http://localhost:3000"
 if [ "$USE_LOCAL_IPFS" = "true" ]; then
     echo "- IPFS API: http://localhost:5001"
     echo "- IPFS Gateway: http://localhost:8080"
@@ -353,7 +373,7 @@ echo ""
 echo -e "${YELLOW}💡 Tips:${NC}"
 echo "- Connect your wallet to http://localhost:8545"
 echo "- Import test accounts using private keys from Anvil"
-echo "- Visit http://localhost:8000/create-proposal to create new QIPs"
+echo "- Visit http://localhost:3000/create-proposal to create new QIPs"
 echo "- All changes are local and will be reset on restart"
 if [ "$MIGRATE_QIPS" = false ]; then
     echo "- Run with --migrate flag to populate QIPs 209-248 from existing files"

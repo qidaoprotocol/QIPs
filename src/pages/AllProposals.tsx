@@ -22,6 +22,13 @@ const statusOrder = ['Draft', 'Review', 'Vote', 'Approved', 'Implemented', 'Reje
 
 const AllProposals: React.FC = () => {
   // Fetch blockchain data
+  // Use Vite env vars with fallback to Gatsby env vars
+  const registryAddress = (import.meta.env.VITE_QIP_REGISTRY_ADDRESS || process.env.GATSBY_QIP_REGISTRY_ADDRESS) as `0x${string}`
+  const useLocalIPFS = (import.meta.env.VITE_USE_LOCAL_IPFS || process.env.GATSBY_USE_LOCAL_IPFS) === 'true'
+  const pinataJwt = import.meta.env.VITE_PINATA_JWT || process.env.GATSBY_PINATA_JWT || ''
+  const pinataGateway = import.meta.env.VITE_PINATA_GATEWAY || process.env.GATSBY_PINATA_GATEWAY || 'https://gateway.pinata.cloud'
+  const localMode = (import.meta.env.VITE_LOCAL_MODE || process.env.GATSBY_LOCAL_MODE) === 'true'
+
   const { 
     blockchainQIPs, 
     isLoading: blockchainLoading, 
@@ -29,14 +36,14 @@ const AllProposals: React.FC = () => {
     invalidateQIPs,
     isFetching
   } = useQIPData({
-    registryAddress: process.env.GATSBY_QIP_REGISTRY_ADDRESS as `0x${string}`,
-    useLocalIPFS: process.env.GATSBY_USE_LOCAL_IPFS === 'true',
-    pinataJwt: process.env.GATSBY_PINATA_JWT || '',
-    pinataGateway: process.env.GATSBY_PINATA_GATEWAY || 'https://gateway.pinata.cloud',
-    localIPFSApi: process.env.GATSBY_LOCAL_IPFS_API || 'http://localhost:5001',
-    localIPFSGateway: process.env.GATSBY_LOCAL_IPFS_GATEWAY || 'http://localhost:8080',
+    registryAddress,
+    useLocalIPFS,
+    pinataJwt,
+    pinataGateway,
+    localIPFSApi: import.meta.env.VITE_LOCAL_IPFS_API || process.env.GATSBY_LOCAL_IPFS_API || 'http://localhost:5001',
+    localIPFSGateway: import.meta.env.VITE_LOCAL_IPFS_GATEWAY || process.env.GATSBY_LOCAL_IPFS_GATEWAY || 'http://localhost:8080',
     pollingInterval: 10000, // 10 seconds for faster updates in dev
-    enabled: !!process.env.GATSBY_QIP_REGISTRY_ADDRESS
+    enabled: !!registryAddress
   })
 
   // Group QIPs by status
@@ -87,7 +94,7 @@ const AllProposals: React.FC = () => {
         <div className="mb-8">
           <h1 className="text-4xl font-bold mb-4">All Proposals</h1>
           
-          {process.env.GATSBY_LOCAL_MODE === 'true' && <LocalModeBanner />}
+          {localMode && <LocalModeBanner />}
           
           {blockchainError && (
             <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
