@@ -19,8 +19,11 @@ contract DeployWithStandardCreate2 is Script {
     function run() public returns (address) {
         uint256 deployerPrivateKey = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
         
-        // Get the bytecode
-        bytes memory bytecode = type(QIPRegistry).creationCode;
+        // Get the bytecode with constructor args
+        // Start at QIP 209 to allow migration of existing QIPs
+        // Pass the governance account address
+        address governanceAccount = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
+        bytes memory bytecode = abi.encodePacked(type(QIPRegistry).creationCode, abi.encode(209, governanceAccount));
         
         // Compute the expected address
         address expectedAddress = computeCreate2Address(bytecode, SALT);
@@ -48,13 +51,9 @@ contract DeployWithStandardCreate2 is Script {
         console.log("QIPRegistry deployed at:", deployedAddress);
         require(deployedAddress == expectedAddress, "Deployed address mismatch");
         
-        // Transfer governance to the deployer account
+        // Verify governance was set correctly
         QIPRegistry registry = QIPRegistry(deployedAddress);
-        address governanceAccount = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
-        
-        // The current governance is the CREATE2 deployer, but we need to transfer it
-        // Since CREATE2 deployer is a contract, we need to do this differently
-        // We'll deploy with the proper governance account as constructor parameter
+        require(registry.governance() == governanceAccount, "Governance not set correctly");
         
         vm.stopBroadcast();
         
@@ -83,7 +82,8 @@ contract DeployWithStandardCreate2 is Script {
      * @notice Helper to get the expected registry address without deploying
      */
     function getExpectedAddress() public pure returns (address) {
-        bytes memory bytecode = type(QIPRegistry).creationCode;
+        address governanceAccount = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
+        bytes memory bytecode = abi.encodePacked(type(QIPRegistry).creationCode, abi.encode(209, governanceAccount));
         return computeCreate2Address(bytecode, SALT);
     }
 }

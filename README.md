@@ -43,14 +43,21 @@ See [NEW_QIP_WORKFLOW.md](docs/NEW_QIP_WORKFLOW.md) for detailed instructions.
 
 1. **Start local test environment:**
 ```bash
-./scripts/startAnvil.sh
+# Basic setup with test QIPs (249-251)
+bun run dev:local
+
+# Or with migration of existing QIPs (209-248)
+bun run dev:local -- --migrate
 ```
 
 This will:
-- Start Anvil (local Ethereum node)
-- Deploy the QIPRegistry contract
-- Create sample QIPs with different statuses
+- Start IPFS daemon (required for local development)
+- Start Anvil (local Ethereum node forked from Base)
+- Deploy the QIPRegistry contract (starting at QIP 209)
+- Create sample QIPs (249-251) with different statuses
+- Optionally migrate existing QIPs (209-248) with their original numbers
 - Set up test accounts with roles (governance, editor, authors)
+- Start Gatsby development server
 
 2. **Run the TypeScript test client:**
 ```bash

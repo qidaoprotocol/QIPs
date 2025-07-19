@@ -33,8 +33,8 @@ contract LocalQIPTest is Script {
         // Create test QIPs as different authors
         _createTestQIPs();
         
-        // Migrate historical QIPs
-        _migrateHistoricalQIPs();
+        // Don't create fake historical QIPs - we have real ones from migration
+        // _migrateHistoricalQIPs();
         
         // Simulate QIP lifecycle
         _simulateQIPLifecycle();
@@ -51,110 +51,95 @@ contract LocalQIPTest is Script {
         // Check if we need to create test QIPs or if they already exist
         uint256 currentNextQIP = registry.nextQIPNumber();
         
-        if (currentNextQIP > 249) {
+        // With the new setup, we start at 209, so test QIPs would be created at 209, 210, 211
+        // But we want to preserve 209-248 for migration, so let's create test QIPs at 249+
+        if (currentNextQIP > 252) {
             console.log("Test QIPs already exist, skipping creation");
             console.log("Current nextQIPNumber:", currentNextQIP);
             return;
         }
         
-        // Create QIP as AUTHOR1
-        vm.startBroadcast(0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d);
+        // If we're starting fresh at 209, we need to skip to 249 for test QIPs
+        if (currentNextQIP < 249) {
+            console.log("Registry starts at", currentNextQIP, "- will create test QIPs at 249+");
+            // We'll use migrateQIP to create them at specific numbers
+            return;
+        }
         
-        uint256 qip1 = registry.createQIP(
+        // Use governance account to migrate test QIPs at specific numbers
+        vm.startBroadcast(0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80);
+        
+        // Check if QIP-249 already exists
+        try registry.qips(249) returns (uint256 qipNum, address, string memory, string memory, bytes32, string memory, uint256, uint256, QIPRegistry.QIPStatus, string memory, uint256, string memory, uint256) {
+            if (qipNum == 249) {
+                console.log("QIP-249 already exists, skipping test QIP creation");
+                vm.stopBroadcast();
+                return;
+            }
+        } catch {
+            // QIP doesn't exist, continue with creation
+        }
+        
+        // Migrate test QIPs at specific numbers with real IPFS content
+        registry.migrateQIP(
+            249,
+            AUTHOR1,
             "Implement Dynamic Interest Rates",
             "Polygon",
             keccak256("QIP-249: Dynamic Interest Rate Model Implementation"),
-            "ipfs://QmTest249DynamicRates"
+            "ipfs://QmWYqKxQPcsAkTLvkGZmZP9oWAEeCYP8J7X5XvKeEHEeC1",
+            block.timestamp,
+            QIPRegistry.QIPStatus.Draft,
+            "None",
+            0,
+            ""
         );
         console.log("Created QIP-249 (Draft) by AUTHOR1");
         
-        vm.stopBroadcast();
-        
-        // Create QIP as AUTHOR2
-        vm.startBroadcast(0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a);
-        
-        uint256 qip2 = registry.createQIP(
+        registry.migrateQIP(
+            250,
+            AUTHOR2,
             "Add Support for New Collateral Types",
             "Base",
             keccak256("QIP-250: Multi-Collateral Support"),
-            "ipfs://QmTest250MultiCollateral"
+            "ipfs://QmXRwXY9QBdAnu3r6hWCaCYKv2Xn5jtB8ZzyS53dQzHDuo",
+            block.timestamp,
+            QIPRegistry.QIPStatus.Draft,
+            "None",
+            0,
+            ""
         );
         console.log("Created QIP-250 (Draft) by AUTHOR2");
         
-        vm.stopBroadcast();
-        
-        // Create QIP as AUTHOR3
-        vm.startBroadcast(0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6);
-        
-        uint256 qip3 = registry.createQIP(
+        registry.migrateQIP(
+            251,
+            AUTHOR3,
             "Governance Token Staking Rewards",
             "Ethereum",
             keccak256("QIP-251: Staking Rewards Program"),
-            "ipfs://QmTest251StakingRewards"
+            "ipfs://QmUJcCwZBKtgF5PjbwSEBVT9royDfpwtt6FRE36N42km1M",
+            block.timestamp,
+            QIPRegistry.QIPStatus.Draft,
+            "None",
+            0,
+            ""
         );
         console.log("Created QIP-251 (Draft) by AUTHOR3");
         
         vm.stopBroadcast();
     }
     
-    function _migrateHistoricalQIPs() internal {
-        // Use governance account (which has migration permissions)
-        vm.startBroadcast(0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80);
-        
-        // Migrate some historical QIPs with different statuses
-        registry.migrateQIP(
-            100,
-            0x1234567890123456789012345678901234567890,
-            "Historical: Protocol Launch",
-            "Polygon",
-            keccak256("QIP-100: Protocol Launch"),
-            "ipfs://QmHistorical100",
-            1640995200, // Jan 1, 2022
-            QIPRegistry.QIPStatus.Implemented,
-            "Core Team",
-            1641600000, // Jan 8, 2022
-            "snapshot.org/#/qidao.eth/proposal/0x100"
-        );
-        console.log("Migrated QIP-100 (Implemented)");
-        
-        registry.migrateQIP(
-            150,
-            0x2345678901234567890123456789012345678901,
-            "Historical: Rejected Proposal",
-            "Ethereum",
-            keccak256("QIP-150: Rejected Proposal"),
-            "ipfs://QmHistorical150",
-            1651017600, // Apr 27, 2022
-            QIPRegistry.QIPStatus.Rejected,
-            "None",
-            0,
-            "snapshot.org/#/qidao.eth/proposal/0x150"
-        );
-        console.log("Migrated QIP-150 (Rejected)");
-        
-        registry.migrateQIP(
-            200,
-            0x3456789012345678901234567890123456789012,
-            "Historical: Superseded Protocol Update",
-            "Base",
-            keccak256("QIP-200: Old Protocol Update"),
-            "ipfs://QmHistorical200",
-            1667260800, // Nov 1, 2022
-            QIPRegistry.QIPStatus.Superseded,
-            "Core Team",
-            1668470400, // Nov 15, 2022
-            "snapshot.org/#/qidao.eth/proposal/0x200"
-        );
-        console.log("Migrated QIP-200 (Superseded)");
-        
-        vm.stopBroadcast();
-    }
+    // Removed _migrateHistoricalQIPs - we use real QIPs from migration instead
     
     function _simulateQIPLifecycle() internal {
-        // Check if test QIPs exist before trying to simulate lifecycle
-        uint256 currentNextQIP = registry.nextQIPNumber();
-        if (currentNextQIP <= 249) {
-            console.log("No test QIPs to simulate lifecycle for");
+        // Check if test QIP-249 exists before trying to simulate lifecycle
+        try registry.qips(249) returns (uint256 qipNum, address, string memory, string memory, bytes32, string memory, uint256, uint256, QIPRegistry.QIPStatus, string memory, uint256, string memory, uint256) {
+            if (qipNum != 249) {
+                console.log("QIP-249 does not exist, skipping lifecycle simulation");
+                return;
+            }
+        } catch {
+            console.log("QIP-249 does not exist, skipping lifecycle simulation");
             return;
         }
         
@@ -181,7 +166,7 @@ contract LocalQIPTest is Script {
             249,
             "Implement Dynamic Interest Rates (Revised)",
             keccak256("QIP-249: Dynamic Interest Rate Model Implementation v2"),
-            "ipfs://QmTest249DynamicRatesV2",
+            "ipfs://QmWYqKxQPcsAkTLvkGZmZP9oWAEeCYP8J7X5XvKeEHEeC1", // Using same CID for simplicity
             "Added more detailed implementation specs"
         );
         console.log("QIP-249: Updated to version 2");

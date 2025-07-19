@@ -18,7 +18,7 @@ contract DeploySimple is Script {
             console.log("QIPRegistry already deployed at:", EXPECTED_REGISTRY);
         } else {
             // Deploy QIPRegistry as the first contract
-            QIPRegistry registry = new QIPRegistry();
+            QIPRegistry registry = new QIPRegistry(209, msg.sender);
             console.log("QIPRegistry deployed at:", address(registry));
             
             // Log the actual address

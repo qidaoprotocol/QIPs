@@ -48,7 +48,7 @@ contract QIPRegistry {
     mapping(address => uint256[]) private authorQIPs;
     mapping(address => bool) public editors;
     
-    uint256 public nextQIPNumber = 249; // Starting after existing QIP-248
+    uint256 public nextQIPNumber;
     address public governance;
     bool public migrationMode = true;
 
@@ -100,9 +100,10 @@ contract QIPRegistry {
         _;
     }
 
-    constructor() {
-        governance = msg.sender;
-        editors[msg.sender] = true;
+    constructor(uint256 _startingQIPNumber, address _governance) {
+        governance = _governance;
+        editors[_governance] = true;
+        nextQIPNumber = _startingQIPNumber;
     }
 
     /**

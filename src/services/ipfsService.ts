@@ -54,12 +54,10 @@ export class Web3StorageProvider implements IPFSProvider {
  */
 export class LocalIPFSProvider implements IPFSProvider {
   private apiUrl: string;
-  private gatewayUrl: string;
   
-  constructor(apiUrl: string = 'http://localhost:5001', gatewayUrl: string = 'http://localhost:8080') {
+  constructor(apiUrl: string = 'http://localhost:5001', _gatewayUrl?: string) {
     this.apiUrl = apiUrl;
-    this.gatewayUrl = gatewayUrl;
-    LocalIPFSProvider.initializeMockData();
+    // gatewayUrl is not used anymore as we fetch via API
   }
 
   async upload(content: string | Blob): Promise<string> {
@@ -67,267 +65,28 @@ export class LocalIPFSProvider implements IPFSProvider {
     const blob = content instanceof Blob ? content : new Blob([content], { type: 'text/plain' });
     formData.append('file', blob);
     
-    try {
-      const response = await fetch(`${this.apiUrl}/api/v0/add`, {
-        method: 'POST',
-        body: formData
-      });
+    const response = await fetch(`${this.apiUrl}/api/v0/add`, {
+      method: 'POST',
+      body: formData
+    });
 
-      if (!response.ok) {
-        throw new Error(`Local IPFS upload failed: ${response.statusText}`);
-      }
-
-      const result = await response.json();
-      return result.Hash;
-    } catch (error) {
-      // Fallback to in-memory storage for pure local development
-      console.warn('Local IPFS daemon not running, using in-memory storage');
-      return this.mockUpload(content);
+    if (!response.ok) {
+      throw new Error(`Local IPFS upload failed: ${response.statusText}. Ensure IPFS daemon is running at ${this.apiUrl}`);
     }
+
+    const result = await response.json();
+    return result.Hash;
   }
 
   async fetch(cid: string): Promise<string> {
-    try {
-      const response = await fetch(`${this.gatewayUrl}/ipfs/${cid}`);
-      if (!response.ok) {
-        throw new Error(`Local IPFS fetch failed: ${response.statusText}`);
-      }
-      return response.text();
-    } catch (error) {
-      // Fallback to in-memory storage
-      console.warn('Local IPFS daemon not running, using in-memory storage');
-      return this.mockFetch(cid);
-    }
-  }
-
-  // In-memory storage for when IPFS daemon is not running
-  private static mockStorage = new Map<string, string>();
-  private static initialized = false;
-
-  private static initializeMockData() {
-    if (LocalIPFSProvider.initialized) return;
-    
-    // Initialize mock storage with test data
-    const testQIPs = [
-      {
-        cid: 'QmTest249DynamicRates',
-        content: `---
-qip: 249
-title: Implement Dynamic Interest Rates
-network: Polygon
-status: Draft
-author: AUTHOR1
-implementor: None
-implementation-date: None
-proposal: None
-created: 2025-01-15
----
-
-## Summary
-
-This proposal implements dynamic interest rates for QiDAO vaults.
-
-## Motivation
-
-To improve capital efficiency and maintain MAI peg stability.
-
-## Specification
-
-Dynamic rates will adjust based on utilization and market conditions.`
-      },
-      {
-        cid: 'QmTest249DynamicRatesV2',
-        content: `---
-qip: 249
-title: Implement Dynamic Interest Rates (Revised)
-network: Polygon
-status: Review
-author: AUTHOR1
-implementor: Core Team
-implementation-date: 2025-02-15
-proposal: snapshot.org/#/qidao.eth/proposal/0x249test
-created: 2025-01-15
----
-
-## Summary
-
-This revised proposal implements dynamic interest rates for QiDAO vaults with more detailed implementation specs.
-
-## Motivation
-
-To improve capital efficiency and maintain MAI peg stability.
-
-## Specification
-
-Dynamic rates will adjust based on utilization and market conditions.
-Added more detailed implementation specs.`
-      },
-      {
-        cid: 'QmTest250MultiCollateral',
-        content: `---
-qip: 250
-title: Add Support for New Collateral Types
-network: Base
-status: ReviewPending
-author: AUTHOR2
-implementor: None
-implementation-date: None
-proposal: None
-created: 2025-01-15
----
-
-## Summary
-
-Add support for multiple new collateral types.
-
-## Motivation
-
-Expand collateral options for users.`
-      },
-      {
-        cid: 'QmTest251StakingRewards',
-        content: `---
-qip: 251
-title: Governance Token Staking Rewards
-network: Ethereum
-status: Withdrawn
-author: AUTHOR3
-implementor: None
-implementation-date: None
-proposal: None
-created: 2025-01-15
----
-
-## Summary
-
-Implement staking rewards for governance token holders.
-
-## Motivation
-
-Incentivize long-term holding.`
-      },
-      {
-        cid: 'QmHistorical100',
-        content: `---
-qip: 100
-title: Historical: Protocol Launch
-network: Polygon
-status: Implemented
-author: Core Team
-implementor: Core Team
-implementation-date: 2022-01-01
-proposal: snapshot.org/#/qidao.eth/proposal/0x100
-created: 2022-01-01
----
-
-## Summary
-
-Initial protocol launch on Polygon.`
-      },
-      {
-        cid: 'QmHistorical150',
-        content: `---
-qip: 150
-title: Historical: Rejected Proposal
-network: Ethereum
-status: Rejected
-author: Community Member
-implementor: None
-implementation-date: None
-proposal: snapshot.org/#/qidao.eth/proposal/0x150
-created: 2022-04-27
----
-
-## Summary
-
-A proposal that was rejected by governance.`
-      },
-      {
-        cid: 'QmHistorical200',
-        content: `---
-qip: 200
-title: Historical: Superseded Protocol Update
-network: Base
-status: Superseded
-author: Core Team
-implementor: Core Team
-implementation-date: 2022-11-15
-proposal: snapshot.org/#/qidao.eth/proposal/0x200
-created: 2022-11-01
----
-
-## Summary
-
-A protocol update that was later superseded.`
-      },
-      {
-        cid: 'Qmf14mfFZQCUR4eC467YjDpaZFCNookdLN89ceSNnjpTF8',
-        content: `---
-qip: 249
-title: test
-network: Polygon
-status: Draft
-author: 0x742d35Cc6634C0532925a3b8D4C9db96590c6C8C
-implementor: None
-implementation-date: None
-proposal: None
-created: ${new Date().toISOString().split('T')[0]}
----
-
-## Summary
-
-This is a test QIP created during development.
-
-## Motivation
-
-Testing the QIP creation and display functionality.`
-      },
-      {
-        cid: 'QmV9d2ufygH8KEXXkyWo9rX4JGXh53HRLHRHpp26vQ7kNA',
-        content: `---
-qip: 250
-title: Another Test QIP
-network: Base
-status: Draft
-author: 0x742d35Cc6634C0532925a3b8D4C9db96590c6C8C
-implementor: None
-implementation-date: None
-proposal: None
-created: ${new Date().toISOString().split('T')[0]}
----
-
-## Summary
-
-This is another test QIP to verify dynamic routing works.
-
-## Motivation
-
-Testing that newly created QIPs can be viewed immediately without rebuilding.`
-      }
-    ];
-
-    // Add test data to mock storage
-    testQIPs.forEach(({ cid, content }) => {
-      LocalIPFSProvider.mockStorage.set(cid, content);
+    // Use the API endpoint for fetching content in local development
+    const response = await fetch(`${this.apiUrl}/api/v0/cat?arg=${cid}`, {
+      method: 'POST'
     });
-    console.log('Mock IPFS: Initialized with test data');
-    LocalIPFSProvider.initialized = true;
-  }
-
-  private mockUpload(content: string | Blob): string {
-    const contentStr = content instanceof Blob ? 'blob-content' : content;
-    const mockCid = `Qm${Math.random().toString(36).substring(2, 15)}`;
-    LocalIPFSProvider.mockStorage.set(mockCid, contentStr);
-    console.log(`Mock IPFS: Stored content with CID ${mockCid}`);
-    return mockCid;
-  }
-
-  private mockFetch(cid: string): string {
-    const content = LocalIPFSProvider.mockStorage.get(cid);
-    if (!content) {
-      throw new Error(`Mock IPFS: Content not found for CID ${cid}`);
+    if (!response.ok) {
+      throw new Error(`Local IPFS fetch failed: ${response.statusText}. Ensure IPFS daemon is running at ${this.apiUrl}`);
     }
-    return content;
+    return response.text();
   }
 }
 

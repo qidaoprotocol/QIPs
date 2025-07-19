@@ -8,18 +8,26 @@
     "gatsby"
   ],
   "scripts": {
-    "develop": "gatsby develop",
-    "start": "gatsby develop",
-    "build": "gatsby build",
-    "serve": "gatsby serve",
-    "clean": "gatsby clean",
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
     "deploy:contracts": "forge script script/Deploy.s.sol --rpc-url $BASE_RPC_URL --broadcast",
     "migrate:qips": "bun scripts/migrate-qips.ts",
-    "dev:local": "./scripts/start-local-dev.sh",
+    "migrate:local-ipfs-dev": "bun run scripts/migrate-to-local-ipfs-dev.ts",
+    "migrate:original-numbers-dev": "bun run scripts/migrate-with-original-numbers-dev.ts",
+    "migrate:local-ipfs:dry": "bun run scripts/migrate-to-local-ipfs.ts --dry-run",
+    "dev:local": "./scripts/start-local-dev-vite.sh",
+    "dev:help": "echo 'Local Development Commands:\\n  npm run dev:local - Start full local environment (IPFS + Anvil + Gatsby)\\n  npm run migrate:local-ipfs-dev - Upload QIPs to local IPFS (dev only)\\n  npm run migrate:original-numbers-dev - Migrate QIPs 209-248 with original numbers (dev only)'",
     "dev:anvil": "./scripts/startAnvil.sh",
     "dev:test-client": "bun run src/localQIPTest.ts",
-    "dev:deploy-only": "forge script script/DeployOnly.s.sol:DeployOnly --rpc-url http://localhost:8545 --broadcast"
+    "dev:deploy-only": "forge script script/DeployOnly.s.sol:DeployOnly --rpc-url http://localhost:8545 --broadcast",
+    "ipfs:setup": "./scripts/setup-ipfs.sh",
+    "ipfs:check": "./scripts/check-ipfs.sh",
+    "ipfs:seed": "bun run ./scripts/seed-ipfs-test-data.ts",
+    "predev:local": "bun run ipfs:check",
+    "dev:with-ipfs": "USE_LOCAL_IPFS=true bun run develop"
   },
   "dependencies": {
     "@mdx-js/react": "^2.3.0",
@@ -43,6 +51,8 @@
     "postcss": "^8.4.31",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "swr": "^2.2.4",
     "tailwindcss": "^3.3.3",
     "viem": "2.x",
@@ -55,7 +65,11 @@
     "@types/node": "^20.3.3",
     "@types/react": "^18.2.14",
     "@types/react-dom": "^18.2.6",
+    "@types/react-router-dom": "^5.3.3",
+    "@vitejs/plugin-react": "^4.6.0",
     "dotenv": "^17.2.0",
-    "typescript": "^5.1.6"
+    "react-router-dom": "^7.7.0",
+    "typescript": "^5.1.6",
+    "vite": "^7.0.4"
   }
 }

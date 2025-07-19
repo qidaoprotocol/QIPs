@@ -15,7 +15,7 @@ contract DeployLocal is Script {
         vm.startBroadcast(deployerPrivateKey);
         
         // Deploy QIPRegistry (governance will be set to msg.sender)
-        QIPRegistry registry = new QIPRegistry();
+        QIPRegistry registry = new QIPRegistry(209, msg.sender);
         
         console.log("QIPRegistry deployed at:", address(registry));
         console.log("Governance set to:", registry.governance());

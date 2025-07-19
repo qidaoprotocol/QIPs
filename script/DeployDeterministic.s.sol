@@ -58,7 +58,7 @@ contract DeployDeterministic is Script {
         
         // Check if registry exists, deploy if not
         if (EXPECTED_REGISTRY.code.length == 0) {
-            bytes memory bytecode = type(QIPRegistry).creationCode;
+            bytes memory bytecode = abi.encodePacked(type(QIPRegistry).creationCode, abi.encode(209));
             address registry = factory.deploy(bytecode, SALT);
             console.log("QIPRegistry deployed at:", registry);
             

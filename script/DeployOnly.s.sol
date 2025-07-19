@@ -10,7 +10,7 @@ contract DeployOnly is Script {
         vm.startBroadcast(deployerPrivateKey);
         
         // Deploy QIPRegistry
-        QIPRegistry registry = new QIPRegistry();
+        QIPRegistry registry = new QIPRegistry(209, msg.sender);
         console.log("QIPRegistry deployed at:", address(registry));
         
         vm.stopBroadcast();

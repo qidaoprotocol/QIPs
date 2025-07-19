@@ -17,9 +17,11 @@ contract Deploy is Script {
         
         vm.startBroadcast(deployerPrivateKey);
 
-        // Deploy QIPRegistry
-        QIPRegistry registry = new QIPRegistry();
+        // Deploy QIPRegistry with starting QIP number
+        // Start at 209 to allow migration of existing QIPs (209-248)
+        QIPRegistry registry = new QIPRegistry(209, msg.sender);
         console.log("QIPRegistry deployed to:", address(registry));
+        console.log("Starting QIP number:", registry.nextQIPNumber());
 
         // Deploy QIPGovernance
         QIPGovernance governance = new QIPGovernance(address(registry));

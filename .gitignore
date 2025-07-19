@@ -20,3 +20,6 @@ gatsby-types.d.ts
 broadcast/
 cache/
 out/
+docs/
+AGENTS.md
+CLAUDE.md

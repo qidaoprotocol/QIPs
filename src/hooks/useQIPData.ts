@@ -74,30 +74,21 @@ export function useQIPData(options: UseQIPDataOptions = {}) {
       }
 
       const qips: QIPData[] = [];
-      const statuses = [
-        QIPStatus.Draft,
-        QIPStatus.ReviewPending,
-        QIPStatus.VotePending,
-        QIPStatus.Approved,
-        QIPStatus.Rejected,
-        QIPStatus.Implemented
-      ];
+      // Workaround for contract bug: directly fetch QIPs 209-248
+      // The getQIPsByStatus function has a bug where it iterates from 1 to nextQIPNumber
+      // but our QIPs start at 209
+      console.log('[useQIPData] Using workaround to fetch QIPs 209-248 directly');
 
-      console.log('[useQIPData] Checking statuses:', statuses);
-
-      for (const status of statuses) {
-        try {
-          const qipNumbers = await qipClient.getQIPsByStatus(status);
-          console.log(`[useQIPData] Status ${QIPStatus[status]} has QIPs:`, qipNumbers);
-          
-          // Handle empty array result (no QIPs with this status)
-          if (!qipNumbers || qipNumbers.length === 0) {
-            continue;
-          }
-          
-          for (const qipNumber of qipNumbers) {
+      for (let qipNum = 209; qipNum <= 248; qipNum++) {
+        const qipNumber = BigInt(qipNum);
             try {
-              const qip = await qipClient.getQIP(BigInt(qipNumber));
+              const qip = await qipClient.getQIP(qipNumber);
+              
+              // Skip if QIP doesn't exist (qipNumber would be 0)
+              if (!qip || qip.qipNumber === 0n) {
+                continue;
+              }
+              
               console.log(`[useQIPData] Fetched QIP ${qipNumber}:`, qip);
               
               // Fetch content from IPFS
@@ -125,13 +116,9 @@ export function useQIPData(options: UseQIPDataOptions = {}) {
                 source: 'blockchain',
                 lastUpdated: Date.now()
               });
-            } catch (error) {
-              console.error(`Error fetching QIP ${qipNumber}:`, error);
-            }
+          } catch (error) {
+            console.error(`Error fetching QIP ${qipNumber}:`, error);
           }
-        } catch (error) {
-          console.error(`Error fetching QIPs with status ${status}:`, error);
-        }
       }
 
       console.log('[useQIPData] Total blockchain QIPs fetched:', qips.length);
