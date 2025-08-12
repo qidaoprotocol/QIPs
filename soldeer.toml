@@ -2,4 +2,5 @@
 enabled = true
 
 [dependencies]
-"@forge-std" = { version = "1.9.5" }
+"@forge-std" = { version = "1.10.0" }
+"@openzeppelin-contracts" = { version = "5.0.0" }

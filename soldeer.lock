@@ -1,0 +1,13 @@
+[[dependencies]]
+name = "@openzeppelin-contracts"
+version = "5.0.0"
+url = "https://soldeer-revisions.s3.amazonaws.com/@openzeppelin-contracts/5_0_0_22-01-2024_13:14:00_contracts.zip"
+checksum = "92a7f5b4ed80537a180d2775e2d2840d59ab1fa89442084213fb4fd5f7f55688"
+integrity = "9394b509841c15163a23f6dd50bb60c8e720176fc6ae79232cac105ed7d4c1aa"
+
+[[dependencies]]
+name = "forge-std"
+version = "1.10.0"
+url = "https://soldeer-revisions.s3.amazonaws.com/forge-std/1_10_0_02-08-2025_06:50:35_forge-std-1.10.zip"
+checksum = "8cc59e92a7762c170c15f2102c4f3718106dfc78239978fe87c64f316740cc09"
+integrity = "3fd441e2499c5cf04ef9b4126f52150a50dcef9cac1645ff7a955345e947cd04"

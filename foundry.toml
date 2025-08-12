@@ -8,6 +8,10 @@ optimizer_runs = 200
 via_ir = true
 evm_version = "shanghai"
 
+[soldeer]
+remappings_generate = true
+remappings_location = "txt"
+
 [etherscan]
 base = { key = "${BASESCAN_API_KEY}" }
 base-sepolia = { key = "${BASESCAN_API_KEY}" }
@@ -15,5 +19,9 @@ base-sepolia = { key = "${BASESCAN_API_KEY}" }
 [rpc_endpoints]
 base = "${BASE_RPC_URL}"
 base-sepolia = "${BASE_SEPOLIA_RPC_URL}"
+
+[dependencies]
+forge-std = "1.10.0"
+"@openzeppelin-contracts" = "5.0.0"
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
