@@ -3,11 +3,9 @@ pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
 import "../contracts/QIPRegistry.sol";
-import "../contracts/QIPGovernance.sol";
 
 contract QIPRegistryTest is Test {
     QIPRegistry public registry;
-    QIPGovernance public governance;
     
     address public alice = makeAddr("alice");
     address public bob = makeAddr("bob");
@@ -23,11 +21,8 @@ contract QIPRegistryTest is Test {
     );
     
     function setUp() public {
-        registry = new QIPRegistry();
-        governance = new QIPGovernance(address(registry));
-        
-        // Transfer governance control to the governance contract
-        registry.transferGovernance(address(governance));
+        // Start QIP numbers at 209 and set this test contract as governance
+        registry = new QIPRegistry(209, address(this));
     }
     
     function test_CreateQIP() public {
@@ -39,10 +34,10 @@ contract QIPRegistryTest is Test {
         string memory ipfsUrl = "ipfs://QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco";
         
         vm.expectEmit(true, true, false, true);
-        emit QIPCreated(249, alice, title, network, contentHash, ipfsUrl);
+        emit QIPCreated(209, alice, title, network, contentHash, ipfsUrl);
         
         uint256 qipNumber = registry.createQIP(title, network, contentHash, ipfsUrl);
-        assertEq(qipNumber, 249);
+        assertEq(qipNumber, 209);
         
         // Verify QIP details
         (
@@ -61,7 +56,7 @@ contract QIPRegistryTest is Test {
             uint256 version
         ) = registry.qips(qipNumber);
         
-        assertEq(returnedNumber, 249);
+        assertEq(returnedNumber, 209);
         assertEq(author, alice);
         assertEq(returnedTitle, title);
         assertEq(returnedNetwork, network);
@@ -102,16 +97,9 @@ contract QIPRegistryTest is Test {
     }
     
     function test_RoleBasedAccess() public {
-        vm.startPrank(address(this)); // Contract deployer is admin
-        
-        // Grant editor role to Bob
-        governance.grantRole(bob, QIPGovernance.Role.Editor, 0, "Trusted editor");
-        
-        // Grant reviewer role to Charlie
-        governance.grantRole(charlie, QIPGovernance.Role.Reviewer, 30 days, "Temp reviewer");
-        
-        vm.stopPrank();
-        
+        // Grant editor role to Bob (only governance can call)
+        registry.setEditor(bob, true);
+
         // Alice creates a QIP
         vm.startPrank(alice);
         uint256 qipNumber = registry.createQIP(
@@ -121,25 +109,22 @@ contract QIPRegistryTest is Test {
             "ipfs://test"
         );
         vm.stopPrank();
-        
+
         // Bob (editor) can update status
         vm.startPrank(bob);
         registry.updateStatus(qipNumber, QIPRegistry.QIPStatus.ReviewPending);
         vm.stopPrank();
-        
-        // Charlie (reviewer) can submit review
+
+        // Charlie (non-editor) cannot update status
         vm.startPrank(charlie);
-        governance.submitReview(qipNumber, "Looks good", true);
+        vm.expectRevert(bytes("Only editor"));
+        registry.updateStatus(qipNumber, QIPRegistry.QIPStatus.Approved);
         vm.stopPrank();
     }
     
     function test_MigrateExistingQIP() public {
-        vm.startPrank(address(this)); // Admin
-        
         // Grant editor role
-        governance.grantRole(alice, QIPGovernance.Role.Editor, 0, "Migration helper");
-        
-        vm.stopPrank();
+        registry.setEditor(alice, true);
         
         // Migrate an existing QIP
         vm.startPrank(alice);
@@ -160,7 +145,13 @@ contract QIPRegistryTest is Test {
         );
         
         // Verify migration
-        (uint256 num, address author,,,,,,,QIPRegistry.QIPStatus status,,,) = registry.qips(existingQipNumber);
+        (
+            uint256 num,
+            address author,
+            , , , , , ,
+            QIPRegistry.QIPStatus status,
+            , , ,
+        ) = registry.qips(existingQipNumber);
         assertEq(num, existingQipNumber);
         assertEq(author, bob);
         assertEq(uint(status), uint(QIPRegistry.QIPStatus.Implemented));
@@ -188,22 +179,16 @@ contract QIPRegistryTest is Test {
         assertEq(linkedId, snapshotId);
         
         // Cannot update after snapshot submission
-        vm.expectRevert("Already submitted to Snapshot");
+        vm.expectRevert("Cannot update after voting");
         registry.updateQIP(qipNumber, "New Title", keccak256("new"), "ipfs://new", "Should fail");
         
         vm.stopPrank();
     }
     
     function test_ReviewWorkflow() public {
-        vm.startPrank(address(this));
-        
-        // Setup reviewers
-        governance.grantRole(bob, QIPGovernance.Role.Reviewer, 0, "Reviewer 1");
-        governance.grantRole(charlie, QIPGovernance.Role.Reviewer, 0, "Reviewer 2");
-        governance.setRequiredReviews(2);
-        
-        vm.stopPrank();
-        
+        // Setup editor
+        registry.setEditor(bob, true);
+
         // Create and submit for review
         vm.startPrank(alice);
         uint256 qipNumber = registry.createQIP(
@@ -213,25 +198,48 @@ contract QIPRegistryTest is Test {
             "ipfs://test"
         );
         
-        // Wait minimum period
-        vm.warp(block.timestamp + 3 days + 1);
-        governance.requestReview(qipNumber);
+        // Stop Alice prank before switching actors
         vm.stopPrank();
-        
-        // First approval
+        // Editor moves status to ReviewPending
         vm.prank(bob);
-        governance.submitReview(qipNumber, "LGTM", true);
+        registry.updateStatus(qipNumber, QIPRegistry.QIPStatus.ReviewPending);
         
-        // Status should still be ReviewPending
-        (,,,,,,,, QIPRegistry.QIPStatus status,,,) = registry.qips(qipNumber);
-        assertEq(uint(status), uint(QIPRegistry.QIPStatus.ReviewPending));
-        
-        // Second approval triggers status change
-        vm.prank(charlie);
-        governance.submitReview(qipNumber, "Approved", true);
+        // Editor moves status to VotePending
+        vm.prank(bob);
+        registry.updateStatus(qipNumber, QIPRegistry.QIPStatus.VotePending);
         
         // Status should now be VotePending
-        (,,,,,,,, status,,,) = registry.qips(qipNumber);
+        (
+            , , , , , , , ,
+            QIPRegistry.QIPStatus status,
+            , , ,
+        ) = registry.qips(qipNumber);
         assertEq(uint(status), uint(QIPRegistry.QIPStatus.VotePending));
+    }
+
+    function test_PausePreventsCreation() public {
+        // Pause by governance
+        registry.pause();
+
+        // Creating a QIP should revert while paused
+        vm.prank(alice);
+        vm.expectRevert(bytes("Registry paused"));
+        registry.createQIP(
+            "Paused Test",
+            "Base",
+            keccak256("content"),
+            "ipfs://paused"
+        );
+
+        // Unpause and try again
+        registry.unpause();
+        vm.prank(alice);
+        uint256 qipNumber = registry.createQIP(
+            "Unpaused Test",
+            "Base",
+            keccak256("content"),
+            "ipfs://ok"
+        );
+        assertEq(qipNumber, 209);
     }
 }

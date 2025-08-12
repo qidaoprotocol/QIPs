@@ -7,14 +7,34 @@ This guide explains how to run the QIPs platform locally with a blockchain envir
 ```bash
 # Start everything with one command
 bun run dev:local
+
+# Or with migration of existing QIPs (209-248)
+bun run dev:local -- --migrate
 ```
 
 This will:
-1. Start Anvil (local Ethereum node forked from Base)
-2. Deploy the QIP Registry smart contract
-3. Set up test data (QIP-249, QIP-250, QIP-251)
-4. Start the Gatsby development server
-5. Open http://localhost:8000 in your browser
+1. Start IPFS daemon (required for local development)
+2. Start Anvil (local Ethereum node forked from Base)
+3. Deploy the QIP Registry smart contract (starting at QIP 209)
+4. Set up test data (QIP-249, QIP-250, QIP-251)
+5. (Optional with --migrate) Upload existing QIPs 209-248 to IPFS and register on-chain
+6. Start the Gatsby development server
+7. Open http://localhost:8000 in your browser
+
+## Local Development Scripts
+
+**Important**: These scripts are for LOCAL DEVELOPMENT ONLY and should not be used in production:
+
+```bash
+# View available local dev commands
+npm run dev:help
+
+# Migrate existing QIPs to local IPFS (dev only)
+npm run migrate:local-ipfs-dev
+
+# Migrate QIPs 209-248 with original numbers (dev only)
+npm run migrate:original-numbers-dev
+```
 
 ## Manual Setup
 
@@ -68,6 +88,12 @@ The following accounts are available with 10,000 ETH each:
 - QIP-250: Multi-Collateral Support (Draft)
 - QIP-251: Staking Rewards (Draft)
 
+### QIP Numbering in Local Development
+- Registry starts at QIP 209 (preserving space for existing QIPs)
+- QIPs 209-248 are reserved for migrating existing proposals
+- Test QIPs are created at 249, 250, 251
+- New QIPs created via UI will start from 252+
+
 ### Test Permissions
 - Only Editor account can change QIP status
 - Only Authors can update their own QIPs
@@ -95,9 +121,9 @@ pkill -f gatsby
 forge script script/DeployOnly.s.sol:DeployOnly --rpc-url http://localhost:8545 --broadcast
 ```
 
-### Gatsby Not Loading Data
+### Vite Not Loading Data
 1. Check `.env` has correct contract address
-2. Clear Gatsby cache: `bun run clean`
+2. Clear build output: `bun run clean`
 3. Restart: `bun run dev:local`
 
 ## Advanced Usage

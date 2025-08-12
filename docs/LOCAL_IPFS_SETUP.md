@@ -6,7 +6,9 @@ This guide explains how to set up and use a local IPFS node for QIPs development
 
 The QIPs platform supports two IPFS storage modes:
 - **Production**: Uses Pinata as a pinning service
-- **Local Development**: Uses a local IPFS daemon with fallback to in-memory storage
+- **Local Development**: **Requires** a local IPFS daemon (no fallback storage)
+
+> **⚠️ Important**: As of the latest update, local development **requires** a running IPFS daemon. The mock storage fallback has been removed to ensure development environment matches production behavior.
 
 ## Installation
 
@@ -93,22 +95,44 @@ GATSBY_PINATA_GATEWAY=https://gateway.pinata.cloud
 
 ## How It Works
 
-1. **With IPFS Running**: 
-   - Proposals are stored in your local IPFS node
-   - Content is accessible via the local gateway
-   - Data persists between sessions
+**With IPFS Running**: 
+- Proposals are stored in your local IPFS node
+- Content is accessible via the local gateway
+- Data persists between sessions
+- Real IPFS CIDs are generated
+- Production-like behavior for testing
 
-2. **Without IPFS (Fallback)**:
-   - Falls back to in-memory storage
-   - Returns mock CIDs for development
-   - Data is lost on page refresh
-   - Console warnings indicate fallback mode
+**Without IPFS**:
+- Development will fail to start
+- Error messages guide you to start IPFS
+- No fallback storage available
+
+## Quick Setup
+
+For first-time setup, run:
+```bash
+# Install IPFS (macOS)
+brew install ipfs
+
+# Configure IPFS for QIPs development
+bun run ipfs:setup
+
+# Start development environment
+bun run dev:local
+```
+
+## Available Scripts
+
+- `bun run ipfs:setup` - One-time IPFS configuration
+- `bun run ipfs:check` - Check IPFS daemon status
+- `bun run ipfs:seed` - Seed test QIP data to IPFS
+- `bun run dev:local` - Start full development environment (includes IPFS check)
 
 ## Verifying Your Setup
 
 Run the check script:
 ```bash
-./scripts/check-ipfs.sh
+bun run ipfs:check
 ```
 
 Expected output:

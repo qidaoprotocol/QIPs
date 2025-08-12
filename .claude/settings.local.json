@@ -24,7 +24,8 @@
       "Bash(./scripts/start-local-dev.sh:*)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:snapshot.mirror.xyz)",
-      "Bash(lsof:*)"
+      "Bash(lsof:*)",
+      "Bash(mkdir:*)"
     ],
     "deny": []
   }

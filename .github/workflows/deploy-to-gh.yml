@@ -1,6 +1,6 @@
-# Workflow for building and deploying QIPs site to GitHub Pages
-# This workflow fetches QIPs from blockchain/IPFS and builds the static site
-name: Deploy QIPs site to Pages
+# Workflow for building and deploying QIPs site to GitHub Pages (Vite)
+# This workflow builds the static site with Vite and publishes the dist/ folder to Pages
+name: Deploy QIPs site to Pages (Vite)
 
 on:
   # Runs on pushes targeting the default branch
@@ -39,35 +39,24 @@ jobs:
       - name: Setup Pages
         id: pages
         uses: actions/configure-pages@v4
-        with:
-          # Automatically inject pathPrefix in your Gatsby configuration file.
-          #
-          # You may remove this line if you want to manage the configuration yourself.
-          static_site_generator: gatsby
-      - name: Restore cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            public
-            .cache
-          key: ${{ runner.os }}-gatsby-build-${{ hashFiles('public') }}
-          restore-keys: |
-            ${{ runner.os }}-gatsby-build-
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      - name: Build with Gatsby
+      - name: Build with Vite
         env:
-          PREFIX_PATHS: 'true'
-          GATSBY_QIP_REGISTRY_ADDRESS: ${{ secrets.QIP_REGISTRY_ADDRESS }}
-          GATSBY_NFT_STORAGE_KEY: ${{ secrets.NFT_STORAGE_KEY }}
-          GATSBY_BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
-          GATSBY_USE_TESTNET: ${{ secrets.USE_TESTNET }}
-          GATSBY_USE_LOCAL_FILES: ${{ secrets.USE_LOCAL_FILES }}
-        run: bun run build
+          VITE_QIP_REGISTRY_ADDRESS: ${{ secrets.QIP_REGISTRY_ADDRESS }}
+          VITE_BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          VITE_WALLETCONNECT_PROJECT_ID: ${{ secrets.WALLETCONNECT_PROJECT_ID }}
+          VITE_USE_TESTNET: 'false'
+          VITE_USE_LOCAL_IPFS: 'false'
+          VITE_PINATA_GATEWAY: ${{ secrets.PINATA_GATEWAY }}
+        run: |
+          bunx tsc --noEmit
+          bun run build -- --base=/${{ github.event.repository.name }}/
+          cp dist/index.html dist/404.html
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./public
+          path: ./dist
 
   # Deployment job
   deploy:

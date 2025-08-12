@@ -51,6 +51,7 @@ contract QIPRegistry {
     uint256 public nextQIPNumber;
     address public governance;
     bool public migrationMode = true;
+    bool public paused = false;
 
     event QIPCreated(
         uint256 indexed qipNumber,
@@ -80,6 +81,9 @@ contract QIPRegistry {
         string snapshotProposalId
     );
 
+    event RegistryPaused(address indexed by);
+    event RegistryUnpaused(address indexed by);
+
     modifier onlyGovernance() {
         require(msg.sender == governance, "Only governance");
         _;
@@ -97,6 +101,11 @@ contract QIPRegistry {
             msg.sender == governance,
             "Only author or editor"
         );
+        _;
+    }
+
+    modifier whenNotPaused() {
+        require(!paused, "Registry paused");
         _;
     }
 
@@ -118,7 +127,7 @@ contract QIPRegistry {
         string memory _network,
         bytes32 _contentHash,
         string memory _ipfsUrl
-    ) external returns (uint256) {
+    ) external whenNotPaused returns (uint256) {
         require(bytes(_title).length > 0, "Title required");
         require(bytes(_network).length > 0, "Network required");
         require(_contentHash != bytes32(0), "Invalid content hash");
@@ -165,6 +174,22 @@ contract QIPRegistry {
         );
         
         return qipNumber;
+    }
+
+    /**
+     * @dev Pause new QIP creation. Editors and governance may still manage existing QIPs.
+     */
+    function pause() external onlyGovernance {
+        paused = true;
+        emit RegistryPaused(msg.sender);
+    }
+
+    /**
+     * @dev Unpause new QIP creation.
+     */
+    function unpause() external onlyGovernance {
+        paused = false;
+        emit RegistryUnpaused(msg.sender);
     }
 
     /**
