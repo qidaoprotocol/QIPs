@@ -1,11 +1,12 @@
 [profile.default]
 src = "contracts"
 out = "out"
-libs = ["dependencies"]
-solc = "0.8.13"
+libs = ["dependencies", "lib"]
+solc = "0.8.30"
 optimizer = true
 optimizer_runs = 200
 via_ir = true
+evm_version = "shanghai"
 
 [etherscan]
 base = { key = "${BASESCAN_API_KEY}" }
