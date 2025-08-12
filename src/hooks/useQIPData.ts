@@ -66,62 +66,71 @@ export function useQIPData(options: UseQIPDataOptions = {}) {
   const blockchainQIPsQuery = useQuery({
     queryKey: ['qips', 'blockchain', registryAddress],
     queryFn: async (): Promise<QIPData[]> => {
-      console.log('[useQIPData] Starting blockchain fetch, registryAddress:', registryAddress);
-      
+      console.log("[useQIPData] Starting blockchain fetch, registryAddress:", registryAddress);
+
       if (!qipClient) {
-        console.log('[useQIPData] No qipClient available');
+        console.log("[useQIPData] No qipClient available");
         return [];
       }
 
       const qips: QIPData[] = [];
-      // Workaround for contract bug: directly fetch QIPs 209-248
-      // The getQIPsByStatus function has a bug where it iterates from 1 to nextQIPNumber
-      // but our QIPs start at 209
-      console.log('[useQIPData] Using workaround to fetch QIPs 209-248 directly');
+      // Query all statuses, union the QIP numbers, then fetch each QIP
+      const statuses: QIPStatus[] = [
+        QIPStatus.Draft,
+        QIPStatus.ReviewPending,
+        QIPStatus.VotePending,
+        QIPStatus.Approved,
+        QIPStatus.Rejected,
+        QIPStatus.Implemented,
+        QIPStatus.Superseded,
+        QIPStatus.Withdrawn,
+      ];
 
-      for (let qipNum = 209; qipNum <= 248; qipNum++) {
-        const qipNumber = BigInt(qipNum);
-            try {
-              const qip = await qipClient.getQIP(qipNumber);
-              
-              // Skip if QIP doesn't exist (qipNumber would be 0)
-              if (!qip || qip.qipNumber === 0n) {
-                continue;
-              }
-              
-              console.log(`[useQIPData] Fetched QIP ${qipNumber}:`, qip);
-              
-              // Fetch content from IPFS
-              const ipfsContent = await ipfsService.fetchQIP(qip.ipfsUrl);
-              const { frontmatter, content } = ipfsService.parseQIPMarkdown(ipfsContent);
-              
-              const implDate = qip.implementationDate > 0n 
-                ? new Date(Number(qip.implementationDate) * 1000).toISOString().split('T')[0]
-                : 'None';
-              
-              qips.push({
-                qipNumber: Number(qipNumber),
-                title: qip.title,
-                network: qip.network,
-                status: qipClient.getStatusString(qip.status),
-                author: frontmatter.author || qip.author,
-                implementor: qip.implementor,
-                implementationDate: implDate,
-                proposal: qip.snapshotProposalId || 'None',
-                created: frontmatter.created || new Date(Number(qip.createdAt) * 1000).toISOString().split('T')[0],
-                content,
-                ipfsUrl: qip.ipfsUrl,
-                contentHash: qip.contentHash,
-                version: Number(qip.version),
-                source: 'blockchain',
-                lastUpdated: Date.now()
-              });
-          } catch (error) {
-            console.error(`Error fetching QIP ${qipNumber}:`, error);
-          }
+      const numbers = new Set<number>();
+      for (const status of statuses) {
+        try {
+          const arr = await qipClient.getQIPsByStatus(status);
+          arr.forEach((n) => numbers.add(Number(n)));
+        } catch (e) {
+          console.warn("[useQIPData] getQIPsByStatus failed for status", status, e);
+        }
       }
 
-      console.log('[useQIPData] Total blockchain QIPs fetched:', qips.length);
+      const sorted = Array.from(numbers).sort((a, b) => a - b);
+      for (const num of sorted) {
+        try {
+          const qip = await qipClient.getQIP(BigInt(num));
+          if (!qip || qip.qipNumber === 0n) continue;
+
+          const ipfsContent = await ipfsService.fetchQIP(qip.ipfsUrl);
+          const { frontmatter, content } = ipfsService.parseQIPMarkdown(ipfsContent);
+
+          const implDate =
+            qip.implementationDate > 0n ? new Date(Number(qip.implementationDate) * 1000).toISOString().split("T")[0] : "None";
+
+          qips.push({
+            qipNumber: num,
+            title: qip.title,
+            network: qip.network,
+            status: qipClient.getStatusString(qip.status),
+            author: frontmatter.author || qip.author,
+            implementor: qip.implementor,
+            implementationDate: implDate,
+            proposal: qip.snapshotProposalId || "None",
+            created: frontmatter.created || new Date(Number(qip.createdAt) * 1000).toISOString().split("T")[0],
+            content,
+            ipfsUrl: qip.ipfsUrl,
+            contentHash: qip.contentHash,
+            version: Number(qip.version),
+            source: "blockchain",
+            lastUpdated: Date.now(),
+          });
+        } catch (error) {
+          console.error(`[useQIPData] Error fetching QIP ${num}:`, error);
+        }
+      }
+
+      console.log("[useQIPData] Total blockchain QIPs fetched:", qips.length);
       return qips;
     },
     enabled: enabled && !!registryAddress && !!qipClient,

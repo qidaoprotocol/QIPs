@@ -16,11 +16,11 @@ contract ComputeNewAddress is Script {
     bytes32 constant SALT = keccak256("QIPRegistry.v1.base");
     
     function run() public pure {
-        // Get the bytecode with constructor args (starting at QIP 209 with governance address)
-        address governanceAccount = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
+        // Get the bytecode with constructor args (starting at QIP 209 with initial admin)
+        address initialAdmin = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
         bytes memory bytecode = abi.encodePacked(
             type(QIPRegistry).creationCode, 
-            abi.encode(209, governanceAccount)
+            abi.encode(209, initialAdmin)
         );
         
         // Compute the CREATE2 address

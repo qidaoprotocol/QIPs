@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.30;
+
+import {AccessControl} from "@openzeppelin/access/AccessControl.sol";
+import {Pausable} from "@openzeppelin/utils/Pausable.sol";
 
 /**
  * @title QIPRegistry
  * @notice On-chain registry for QiDAO Improvement Proposals stored on IPFS
  * @dev Manages QIP metadata, versioning, and status transitions
  */
-contract QIPRegistry {
+contract QIPRegistry is AccessControl, Pausable {
+    bytes32 public constant EDITOR_ROLE = keccak256("EDITOR_ROLE");
     struct QIP {
         uint256 qipNumber;
         address author;
@@ -46,12 +50,10 @@ contract QIPRegistry {
     mapping(uint256 => uint256) public qipVersionCount;
     mapping(bytes32 => uint256) public contentHashToQIP;
     mapping(address => uint256[]) private authorQIPs;
-    mapping(address => bool) public editors;
     
     uint256 public nextQIPNumber;
-    address public governance;
+    // No persistent governance address; rely on roles
     bool public migrationMode = true;
-    bool public paused = false;
 
     event QIPCreated(
         uint256 indexed qipNumber,
@@ -81,38 +83,21 @@ contract QIPRegistry {
         string snapshotProposalId
     );
 
-    event RegistryPaused(address indexed by);
-    event RegistryUnpaused(address indexed by);
-
-    modifier onlyGovernance() {
-        require(msg.sender == governance, "Only governance");
-        _;
-    }
-
-    modifier onlyEditor() {
-        require(editors[msg.sender] || msg.sender == governance, "Only editor");
-        _;
-    }
-
     modifier onlyAuthorOrEditor(uint256 _qipNumber) {
         require(
-            qips[_qipNumber].author == msg.sender || 
-            editors[msg.sender] || 
-            msg.sender == governance,
+            qips[_qipNumber].author == msg.sender ||
+            hasRole(EDITOR_ROLE, msg.sender) ||
+            hasRole(DEFAULT_ADMIN_ROLE, msg.sender),
             "Only author or editor"
         );
         _;
     }
 
-    modifier whenNotPaused() {
-        require(!paused, "Registry paused");
-        _;
-    }
-
-    constructor(uint256 _startingQIPNumber, address _governance) {
-        governance = _governance;
-        editors[_governance] = true;
+    constructor(uint256 _startingQIPNumber, address _initialAdmin) {
         nextQIPNumber = _startingQIPNumber;
+
+        _grantRole(DEFAULT_ADMIN_ROLE, _initialAdmin);
+        _grantRole(EDITOR_ROLE, _initialAdmin);
     }
 
     /**
@@ -134,7 +119,12 @@ contract QIPRegistry {
         require(bytes(_ipfsUrl).length > 0, "IPFS URL required");
         require(contentHashToQIP[_contentHash] == 0, "Content already exists");
         
+        
+        while (qips[nextQIPNumber].qipNumber != 0) {
+            unchecked { nextQIPNumber++; }
+        }
         uint256 qipNumber = nextQIPNumber++;
+        require(qips[qipNumber].qipNumber == 0, "QIP slot already used");
         
         qips[qipNumber] = QIP({
             qipNumber: qipNumber,
@@ -177,19 +167,17 @@ contract QIPRegistry {
     }
 
     /**
-     * @dev Pause new QIP creation. Editors and governance may still manage existing QIPs.
+     * @dev Pause new QIP creation. Editors and admins may still manage existing QIPs.
      */
-    function pause() external onlyGovernance {
-        paused = true;
-        emit RegistryPaused(msg.sender);
+    function pause() external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _pause();
     }
 
     /**
      * @dev Unpause new QIP creation.
      */
-    function unpause() external onlyGovernance {
-        paused = false;
-        emit RegistryUnpaused(msg.sender);
+    function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _unpause();
     }
 
     /**
@@ -244,9 +232,9 @@ contract QIPRegistry {
     /**
      * @dev Update QIP status
      */
-    function updateStatus(uint256 _qipNumber, QIPStatus _newStatus) 
-        external 
-        onlyEditor 
+    function updateStatus(uint256 _qipNumber, QIPStatus _newStatus)
+        external
+        onlyRole(EDITOR_ROLE)
     {
         QIP storage qip = qips[_qipNumber];
         require(qip.qipNumber > 0, "QIP does not exist");
@@ -284,7 +272,7 @@ contract QIPRegistry {
         uint256 _qipNumber,
         string memory _implementor,
         uint256 _implementationDate
-    ) external onlyEditor {
+    ) external onlyRole(EDITOR_ROLE) {
         QIP storage qip = qips[_qipNumber];
         require(qip.qipNumber > 0, "QIP does not exist");
         
@@ -296,22 +284,30 @@ contract QIPRegistry {
     /**
      * @dev Add or remove editor
      */
-    function setEditor(address _editor, bool _status) external onlyGovernance {
-        editors[_editor] = _status;
+    function setEditor(address _editor, bool _status) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (_status) {
+            _grantRole(EDITOR_ROLE, _editor);
+        } else {
+            _revokeRole(EDITOR_ROLE, _editor);
+        }
     }
 
     /**
-     * @dev Transfer governance
+     * @dev Transfer admin/editor privileges from the caller to a new admin.
      */
-    function transferGovernance(address _newGovernance) external onlyGovernance {
-        require(_newGovernance != address(0), "Invalid address");
-        governance = _newGovernance;
+    function transferAdmin(address newAdmin) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(newAdmin != address(0), "Invalid address");
+        address oldAdmin = msg.sender;
+        _grantRole(DEFAULT_ADMIN_ROLE, newAdmin);
+        _revokeRole(DEFAULT_ADMIN_ROLE, oldAdmin);
+        _grantRole(EDITOR_ROLE, newAdmin);
+        _revokeRole(EDITOR_ROLE, oldAdmin);
     }
 
     /**
      * @dev Disable migration mode (after migrating existing QIPs)
      */
-    function disableMigrationMode() external onlyGovernance {
+    function disableMigrationMode() external onlyRole(DEFAULT_ADMIN_ROLE) {
         migrationMode = false;
     }
 
@@ -330,7 +326,7 @@ contract QIPRegistry {
         string memory _implementor,
         uint256 _implementationDate,
         string memory _snapshotProposalId
-    ) external onlyEditor {
+    ) external onlyRole(EDITOR_ROLE) {
         require(migrationMode, "Migration mode disabled");
         require(qips[_qipNumber].qipNumber == 0, "QIP already exists");
         
@@ -361,6 +357,22 @@ contract QIPRegistry {
         
         contentHashToQIP[_contentHash] = _qipNumber;
         authorQIPs[_author].push(_qipNumber);
+
+        // Keep nextQIPNumber pointing to the next unused index
+        if (_qipNumber >= nextQIPNumber) {
+            nextQIPNumber = _qipNumber + 1;
+        }
+    }
+
+    /**
+     * @dev Synchronize nextQIPNumber to the next unused index after migrations
+     */
+    function syncNextQIPNumber() external onlyRole(DEFAULT_ADMIN_ROLE) {
+        uint256 candidate = nextQIPNumber;
+        while (qips[candidate].qipNumber != 0) {
+            unchecked { candidate++; }
+        }
+        nextQIPNumber = candidate;
     }
 
     /**

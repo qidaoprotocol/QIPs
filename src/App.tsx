@@ -8,6 +8,7 @@ import AllProposals from './pages/AllProposals'
 import CreateProposal from './pages/CreateProposal'
 import QIPDetail from './pages/QIPDetail'
 import TemplatesPage from './pages/TemplatesPage'
+import EditProposal from "./pages/EditProposal";
 
 function App() {
   return (
@@ -18,11 +19,12 @@ function App() {
           <Route path="/all-proposals" element={<AllProposals />} />
           <Route path="/qips/:qipNumber" element={<QIPDetail />} />
           <Route path="/create-proposal" element={<CreateProposal />} />
+          <Route path="/edit-proposal" element={<EditProposal />} />
           <Route path="/templates" element={<TemplatesPage />} />
         </Routes>
       </Router>
     </Web3Provider>
-  )
+  );
 }
 
 export default App

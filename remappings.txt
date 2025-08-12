@@ -1,2 +1,5 @@
 @openzeppelin-contracts-5.0.0/=dependencies/@openzeppelin-contracts-5.0.0/
+@openzeppelin/=dependencies/@openzeppelin-contracts-5.0.0/
+@openzeppelin/contracts/=dependencies/@openzeppelin-contracts-5.0.0/
 forge-std-1.10.0/=dependencies/forge-std-1.10.0/
+forge-std/=dependencies/forge-std-1.10.0/src/

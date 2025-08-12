@@ -249,26 +249,25 @@ echo -e "${GREEN}✅ Anvil is running on http://localhost:8545${NC}"
 echo -e "\n${GREEN}2. Deploying QIP Registry contract (deterministic)...${NC}"
 DEPLOY_OUTPUT=$(forge script script/DeployWithStandardCreate2.s.sol:DeployWithStandardCreate2 --rpc-url http://localhost:8545 --broadcast -vvv 2>&1)
 
-# Extract the registry address from the deploy output
+# Extract expected and actual addresses from the deploy output
+EXPECTED_ADDRESS=$(echo "$DEPLOY_OUTPUT" | grep "Expected QIPRegistry address:" | awk '{print $4}')
 REGISTRY_ADDRESS=$(echo "$DEPLOY_OUTPUT" | grep "QIPRegistry deployed at:" | awk '{print $4}')
 
-# If not found in deploy output, check if already deployed
+# If not deployed in this run, check if already deployed line is present
 if [ -z "$REGISTRY_ADDRESS" ]; then
-    # Check for "already deployed" message
     REGISTRY_ADDRESS=$(echo "$DEPLOY_OUTPUT" | grep "QIPRegistry already deployed at:" | awk '{print $5}')
 fi
 
-# Use the deterministic address as fallback
-if [ -z "$REGISTRY_ADDRESS" ]; then
-    REGISTRY_ADDRESS="0xf5D5CdccEe171F02293337b7F3eda4D45B85B233"
-    echo -e "${YELLOW}Using deterministic registry address: $REGISTRY_ADDRESS${NC}"
+# As a final fallback, use the expected computed address
+if [ -z "$REGISTRY_ADDRESS" ] && [ -n "$EXPECTED_ADDRESS" ]; then
+    REGISTRY_ADDRESS="$EXPECTED_ADDRESS"
+    echo -e "${YELLOW}Using computed expected registry address: $REGISTRY_ADDRESS${NC}"
 fi
 
 echo -e "${GREEN}✅ QIP Registry at: $REGISTRY_ADDRESS${NC}"
 
 # Verify the address matches the expected deterministic address
-EXPECTED_ADDRESS="0xf5D5CdccEe171F02293337b7F3eda4D45B85B233"
-if [ "$REGISTRY_ADDRESS" != "$EXPECTED_ADDRESS" ]; then
+if [ -n "$EXPECTED_ADDRESS" ] && [ "$REGISTRY_ADDRESS" != "$EXPECTED_ADDRESS" ]; then
     echo -e "${RED}❌ Registry address mismatch!${NC}"
     echo "Expected: $EXPECTED_ADDRESS"
     echo "Got: $REGISTRY_ADDRESS"

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useQueryClient } from "@tanstack/react-query";
 import { useAccount, useWalletClient, useSwitchChain } from 'wagmi';
 import { type Address } from 'viem';
 import { QIPClient, QIPStatus, type QIPContent } from '../services/qipClient';
@@ -69,31 +70,32 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
   // Services
   const [qipClient, setQipClient] = useState<QIPClient | null>(null);
   const [ipfsService, setIpfsService] = useState<IPFSService | null>(null);
-  
+  const queryClient = useQueryClient();
+
   // Debug saving state changes
   useEffect(() => {
-    console.log('🔍 Saving state changed:', saving);
+    console.log("🔍 Saving state changed:", saving);
   }, [saving]);
-  
+
   // Add a safety timeout to clear saving state if it gets stuck
   useEffect(() => {
     if (saving) {
       const timeout = setTimeout(() => {
-        console.warn('⚠️ Saving state stuck for 30 seconds, forcing clear');
+        console.warn("⚠️ Saving state stuck for 30 seconds, forcing clear");
         setSaving(false);
         if (!success && !error) {
-          setError('Operation timed out. Please check if your transaction was successful.');
+          setError("Operation timed out. Please check if your transaction was successful.");
         }
       }, 30000); // 30 second timeout
-      
+
       return () => clearTimeout(timeout);
     }
   }, [saving, success, error]);
 
   useEffect(() => {
     if (registryAddress) {
-      console.log('🔧 Initializing QIPClient with RPC:', rpcUrl || 'http://localhost:8545');
-      const client = new QIPClient(registryAddress, rpcUrl || 'http://localhost:8545');
+      console.log("🔧 Initializing QIPClient with RPC:", rpcUrl || "http://localhost:8545");
+      const client = new QIPClient(registryAddress, rpcUrl || "http://localhost:8545");
       setQipClient(client);
     }
 
@@ -101,108 +103,109 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
     if (useLocalIPFS) {
       const service = new IPFSService(new LocalIPFSProvider(localIPFSApi, localIPFSGateway));
       setIpfsService(service);
-      console.log('Using Local IPFS for storage');
+      console.log("Using Local IPFS for storage");
     } else if (pinataJwt) {
       const service = new IPFSService(new PinataProvider(pinataJwt, pinataGateway));
       setIpfsService(service);
-      console.log('Using Pinata for IPFS storage');
+      console.log("Using Pinata for IPFS storage");
     }
   }, [registryAddress, walletClient, pinataJwt, pinataGateway, useLocalIPFS, localIPFSApi, localIPFSGateway, rpcUrl]);
 
-  const handleSubmit = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    console.log('📝 Form submission started');
-    
-    if (!qipClient || !ipfsService || !address || !walletClient) {
-      setError('Please connect your wallet');
-      console.error('❌ Missing required services:', { qipClient: !!qipClient, ipfsService: !!ipfsService, address });
-      return;
-    }
+  const handleSubmit = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      console.log("📝 Form submission started");
 
-    setError(null);
-    setSuccess(null);
-    setSaving(true);
-    console.log('🔄 Saving state set to true');
+      if (!qipClient || !ipfsService || !address || !walletClient) {
+        setError("Please connect your wallet");
+        console.error("❌ Missing required services:", { qipClient: !!qipClient, ipfsService: !!ipfsService, address });
+        return;
+      }
 
-    try {
-      // Create QIP content object
-      const qipContent: QIPContent = {
-        qip: existingQIP?.qipNumber ? Number(existingQIP.qipNumber) : 0, // Will be assigned by contract
-        title,
-        network,
-        status: 'Draft',
-        author: address,
-        implementor,
-        'implementation-date': 'None',
-        proposal: 'None',
-        created: new Date().toISOString().split('T')[0],
-        content
-      };
+      setError(null);
+      setSuccess(null);
+      setSaving(true);
+      console.log("🔄 Saving state set to true");
 
-      // Upload to IPFS
-      console.log('📤 Uploading to IPFS...');
-      const { cid, ipfsUrl, contentHash } = await ipfsService.uploadQIP(qipContent);
-      console.log('✅ IPFS upload successful:', { cid, ipfsUrl });
-      
-      if (existingQIP) {
-        // Update existing QIP
-        const tx = await qipClient.updateQIP(
-          walletClient,
-          existingQIP.qipNumber,
-          title,
-          contentHash,
-          ipfsUrl,
-          'Updated via web interface'
-        );
-        
-        setSuccess(`QIP-${existingQIP.qipNumber} updated successfully! Transaction: ${tx}`);
-      } else {
-        // Create new QIP
-        console.log('🚀 Creating new QIP on blockchain...');
-        const { hash, qipNumber } = await qipClient.createQIP(
-          walletClient,
+      try {
+        // Create QIP content object
+        const qipContent: QIPContent = {
+          qip: existingQIP?.qipNumber ? Number(existingQIP.qipNumber) : 0, // Will be assigned by contract
           title,
           network,
-          contentHash,
-          ipfsUrl
-        );
-        console.log('✅ QIP created successfully:', { hash, qipNumber });
-        
-        console.log('📝 Setting success state...');
-        if (qipNumber > 0) {
-          setSuccess(`QIP-${qipNumber} created successfully! Transaction: ${hash}`);
+          status: "Draft",
+          author: address,
+          implementor,
+          "implementation-date": "None",
+          proposal: "None",
+          created: new Date().toISOString().split("T")[0],
+          content,
+        };
+
+        // Upload to IPFS
+        console.log("📤 Uploading to IPFS...");
+        const { cid, ipfsUrl, contentHash } = await ipfsService.uploadQIPFromContent(qipContent);
+        console.log("✅ IPFS upload successful:", { cid, ipfsUrl });
+
+        if (existingQIP) {
+          // Update existing QIP
+          const tx = await qipClient.updateQIP(
+            walletClient,
+            existingQIP.qipNumber,
+            title,
+            contentHash,
+            ipfsUrl,
+            "Updated via web interface"
+          );
+
+          setSuccess(`QIP-${existingQIP.qipNumber} updated successfully! Transaction: ${tx}`);
         } else {
-          setSuccess(`QIP submitted successfully! Transaction: ${hash}\n\nNote: The QIP number will be available once the transaction is confirmed.`);
+          // Create new QIP
+          console.log("🚀 Creating new QIP on blockchain...");
+          const { hash, qipNumber } = await qipClient.createQIP(walletClient, title, network, contentHash, ipfsUrl);
+          console.log("✅ QIP created successfully:", { hash, qipNumber });
+
+          console.log("📝 Setting success state...");
+          if (qipNumber > 0) {
+            setSuccess(`QIP-${qipNumber} created successfully! Transaction: ${hash}`);
+          } else {
+            setSuccess(
+              `QIP submitted successfully! Transaction: ${hash}\n\nNote: The QIP number will be available once the transaction is confirmed.`
+            );
+          }
+          console.log("✅ Success state set");
+          // Invalidate list to refresh AllProposals
+          queryClient.invalidateQueries({ queryKey: ["qips"] });
+
+          // Reset form for new QIP
+          console.log("🔄 Resetting form...");
+          setTitle("");
+          setContent("");
+          setImplementor("None");
+          console.log("✅ Form reset complete");
+
+          // Force a re-render by updating saving state again
+          setSaving(false);
         }
-        console.log('✅ Success state set');
-        
-        // Reset form for new QIP
-        console.log('🔄 Resetting form...');
-        setTitle('');
-        setContent('');
-        setImplementor('None');
-        console.log('✅ Form reset complete');
-        
-        // Force a re-render by updating saving state again
+      } catch (err: any) {
+        console.error("❌ Error saving QIP:", err);
+
+        // Provide more helpful error messages
+        let errorMessage = err.message || "Failed to save QIP";
+
+        if (errorMessage.includes("Content already exists")) {
+          errorMessage = "A QIP with identical content already exists. Please modify your proposal content to make it unique.";
+        }
+
+        setError(errorMessage);
+      } finally {
+        console.log("🔄 Setting saving state to false in finally block");
         setSaving(false);
+        console.log("✅ Saving state set to false");
       }
-    } catch (err: any) {
-      console.error('❌ Error saving QIP:', err);
-      
-      // Provide more helpful error messages
-      let errorMessage = err.message || 'Failed to save QIP';
-      
-      if (errorMessage.includes('Content already exists')) {
-        errorMessage = 'A QIP with identical content already exists. Please modify your proposal content to make it unique.';
-      }
-      
-      setError(errorMessage);
-    } finally {
-      console.log('🔄 Setting saving state to false in finally block');
-      setSaving(false);
-      console.log('✅ Saving state set to false');
-    }
-  }, [qipClient, ipfsService, address, walletClient, title, network, content, implementor, existingQIP]);
+    },
+    [qipClient, ipfsService, address, walletClient, title, network, content, implementor, existingQIP]
+  );
 
   const handlePreview = () => {
     setPreview(!preview);

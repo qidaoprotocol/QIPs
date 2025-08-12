@@ -21,9 +21,9 @@ contract DeployWithStandardCreate2 is Script {
         
         // Get the bytecode with constructor args
         // Start at QIP 209 to allow migration of existing QIPs
-        // Pass the governance account address
-        address governanceAccount = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
-        bytes memory bytecode = abi.encodePacked(type(QIPRegistry).creationCode, abi.encode(209, governanceAccount));
+        // Pass the initial admin address
+        address initialAdmin = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
+        bytes memory bytecode = abi.encodePacked(type(QIPRegistry).creationCode, abi.encode(209, initialAdmin));
         
         // Compute the expected address
         address expectedAddress = computeCreate2Address(bytecode, SALT);
@@ -51,9 +51,9 @@ contract DeployWithStandardCreate2 is Script {
         console.log("QIPRegistry deployed at:", deployedAddress);
         require(deployedAddress == expectedAddress, "Deployed address mismatch");
         
-        // Verify governance was set correctly
+        // Verify admin role was granted correctly
         QIPRegistry registry = QIPRegistry(deployedAddress);
-        require(registry.governance() == governanceAccount, "Governance not set correctly");
+        require(registry.hasRole(registry.DEFAULT_ADMIN_ROLE(), initialAdmin), "Admin not set correctly");
         
         vm.stopBroadcast();
         
@@ -82,8 +82,8 @@ contract DeployWithStandardCreate2 is Script {
      * @notice Helper to get the expected registry address without deploying
      */
     function getExpectedAddress() public pure returns (address) {
-        address governanceAccount = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
-        bytes memory bytecode = abi.encodePacked(type(QIPRegistry).creationCode, abi.encode(209, governanceAccount));
+        address initialAdmin = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
+        bytes memory bytecode = abi.encodePacked(type(QIPRegistry).creationCode, abi.encode(209, initialAdmin));
         return computeCreate2Address(bytecode, SALT);
     }
 }
