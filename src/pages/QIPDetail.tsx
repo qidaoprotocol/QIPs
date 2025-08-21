@@ -8,6 +8,7 @@ import SnapshotSubmitter from '../components/SnapshotSubmitter'
 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { config } from '../config/env'
 
 const QIPDetail: React.FC = () => {
   const { qipNumber } = useParams<{ qipNumber: string }>()
@@ -18,19 +19,13 @@ const QIPDetail: React.FC = () => {
   // Extract number from QIP-XXX format
   const qipNumberParsed = qipNumber?.replace('QIP-', '') || '0'
 
-  // Use Vite env vars
-  const registryAddress = (import.meta.env.VITE_QIP_REGISTRY_ADDRESS || process.env.GATSBY_QIP_REGISTRY_ADDRESS) as `0x${string}`
-  const useLocalIPFS = (import.meta.env.VITE_USE_LOCAL_IPFS || process.env.GATSBY_USE_LOCAL_IPFS) === 'true'
-  const pinataJwt = import.meta.env.VITE_PINATA_JWT || process.env.GATSBY_PINATA_JWT || ''
-  const pinataGateway = import.meta.env.VITE_PINATA_GATEWAY || process.env.GATSBY_PINATA_GATEWAY || 'https://gateway.pinata.cloud'
-  const rpcUrl = import.meta.env.VITE_BASE_RPC_URL || process.env.GATSBY_BASE_RPC_URL || 'http://localhost:8545'
+  // Use config values
+  const registryAddress = config.qipRegistryAddress
+  const rpcUrl = config.baseRpcUrl
 
   const { data: qipData, isLoading: loading, error } = useQIP({
     registryAddress,
     qipNumber: parseInt(qipNumberParsed),
-    useLocalIPFS,
-    pinataJwt,
-    pinataGateway,
     rpcUrl,
     enabled: !!registryAddress && !!qipNumber
   })

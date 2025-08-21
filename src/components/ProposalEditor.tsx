@@ -3,15 +3,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAccount, useWalletClient, useSwitchChain } from 'wagmi';
 import { type Address } from 'viem';
 import { QIPClient, QIPStatus, type QIPContent } from '../services/qipClient';
-import { IPFSService, PinataProvider, LocalIPFSProvider } from '../services/ipfsService';
+import { getIPFSService } from '../services/getIPFSService';
+import { IPFSService } from '../services/ipfsService';
 
 interface ProposalEditorProps {
   registryAddress: Address;
-  pinataJwt?: string;
-  pinataGateway?: string;
-  useLocalIPFS?: boolean;
-  localIPFSApi?: string;
-  localIPFSGateway?: string;
   rpcUrl?: string;
   existingQIP?: {
     qipNumber: bigint;
@@ -23,11 +19,6 @@ const NETWORKS = ['Polygon', 'Ethereum', 'Base', 'Metis', 'Arbitrum', 'Optimism'
 
 export const ProposalEditor: React.FC<ProposalEditorProps> = ({ 
   registryAddress, 
-  pinataJwt,
-  pinataGateway,
-  useLocalIPFS,
-  localIPFSApi,
-  localIPFSGateway,
   rpcUrl,
   existingQIP 
 }) => {
@@ -38,13 +29,20 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
   // Debug logging
   console.log("🔍 ProposalEditor Debug:");
   console.log("- registryAddress:", registryAddress);
-  console.log("- useLocalIPFS:", useLocalIPFS);
-  console.log("- pinataJwt:", pinataJwt ? "✅ Set" : "❌ Not set");
   console.log("- Wallet Connection Status:", status);
   console.log("- isConnected:", isConnected);
   console.log("- address:", address);
   console.log("- chain:", chain);
   console.log("- walletClient:", walletClient ? "✅ Available" : "❌ Not available");
+  
+  // Debug environment variables directly
+  console.log("🔍 Direct Env Vars Check:");
+  // @ts-ignore
+  console.log("- VITE_USE_MAI_API:", import.meta.env?.VITE_USE_MAI_API);
+  // @ts-ignore
+  console.log("- VITE_IPFS_API_URL:", import.meta.env?.VITE_IPFS_API_URL);
+  // @ts-ignore
+  console.log("- VITE_USE_LOCAL_IPFS:", import.meta.env?.VITE_USE_LOCAL_IPFS);
   
   // Check if we need to switch chains
   const isWrongChain = chain && chain.id !== 8453;
@@ -99,17 +97,16 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
       setQipClient(client);
     }
 
-    // Use Local IPFS in development mode, otherwise use Pinata
-    if (useLocalIPFS) {
-      const service = new IPFSService(new LocalIPFSProvider(localIPFSApi, localIPFSGateway));
+    // Use centralized IPFS service selection
+    try {
+      const service = getIPFSService();
       setIpfsService(service);
-      console.log("Using Local IPFS for storage");
-    } else if (pinataJwt) {
-      const service = new IPFSService(new PinataProvider(pinataJwt, pinataGateway));
-      setIpfsService(service);
-      console.log("Using Pinata for IPFS storage");
+      console.log("✅ IPFS service initialized successfully");
+    } catch (error) {
+      console.error("❌ Failed to initialize IPFS service:", error);
+      // Service will remain null, and the component will show the error state
     }
-  }, [registryAddress, walletClient, pinataJwt, pinataGateway, useLocalIPFS, localIPFSApi, localIPFSGateway, rpcUrl]);
+  }, [registryAddress, walletClient, rpcUrl]);
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -227,10 +224,10 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
     );
   }
   
-  if (!useLocalIPFS && !pinataJwt) {
+  if (!ipfsService) {
     return (
       <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-        Error: IPFS provider not configured. Please set GATSBY_PINATA_JWT or enable local IPFS mode.
+        Error: IPFS provider not configured. Please check your environment configuration.
       </div>
     );
   }

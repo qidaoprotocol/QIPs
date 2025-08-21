@@ -17,12 +17,19 @@ contract DeployWithStandardCreate2 is Script {
     bytes32 constant SALT = keccak256("QIPRegistry.v1.base");
     
     function run() public returns (address) {
-        uint256 deployerPrivateKey = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
+        // Derive deployer and initial admin from env vars for production safety
+        // PRIVATE_KEY is required; INITIAL_ADMIN is optional (defaults to deployer EOA)
+        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        address initialAdmin;
+        try vm.envAddress("INITIAL_ADMIN") returns (address a) {
+            initialAdmin = a;
+        } catch {
+            initialAdmin = vm.addr(deployerPrivateKey);
+        }
         
         // Get the bytecode with constructor args
         // Start at QIP 209 to allow migration of existing QIPs
         // Pass the initial admin address
-        address initialAdmin = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
         bytes memory bytecode = abi.encodePacked(type(QIPRegistry).creationCode, abi.encode(209, initialAdmin));
         
         // Compute the expected address
@@ -82,7 +89,13 @@ contract DeployWithStandardCreate2 is Script {
      * @notice Helper to get the expected registry address without deploying
      */
     function getExpectedAddress() public pure returns (address) {
-        address initialAdmin = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
+        // Backward-compatible helper for local dev default admin
+        address defaultDevAdmin = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266;
+        bytes memory bytecode = abi.encodePacked(type(QIPRegistry).creationCode, abi.encode(209, defaultDevAdmin));
+        return computeCreate2Address(bytecode, SALT);
+    }
+
+    function getExpectedAddressFor(address initialAdmin) public pure returns (address) {
         bytes memory bytecode = abi.encodePacked(type(QIPRegistry).creationCode, abi.encode(209, initialAdmin));
         return computeCreate2Address(bytecode, SALT);
     }

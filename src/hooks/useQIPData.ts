@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePublicClient } from 'wagmi';
 import { QIPClient, QIPStatus } from '../services/qipClient';
-import { IPFSService, LocalIPFSProvider, PinataProvider } from '../services/ipfsService';
+import { IPFSService } from '../services/ipfsService';
+import { getIPFSService } from '../services/getIPFSService';
 
 export interface QIPData {
   qipNumber: number;
@@ -23,11 +24,6 @@ export interface QIPData {
 
 interface UseQIPDataOptions {
   registryAddress?: `0x${string}`;
-  useLocalIPFS?: boolean;
-  pinataJwt?: string;
-  pinataGateway?: string;
-  localIPFSApi?: string;
-  localIPFSGateway?: string;
   pollingInterval?: number;
   enabled?: boolean;
 }
@@ -41,11 +37,6 @@ interface UseQIPDataOptions {
 export function useQIPData(options: UseQIPDataOptions = {}) {
   const {
     registryAddress,
-    useLocalIPFS = false,
-    pinataJwt = '',
-    pinataGateway = 'https://gateway.pinata.cloud',
-    localIPFSApi = 'http://localhost:5001',
-    localIPFSGateway = 'http://localhost:8080',
     pollingInterval = 30000, // 30 seconds default
     enabled = true,
   } = options;
@@ -58,9 +49,8 @@ export function useQIPData(options: UseQIPDataOptions = {}) {
     ? new QIPClient(registryAddress, 'http://localhost:8545', false)
     : null;
 
-  const ipfsService = useLocalIPFS
-    ? new IPFSService(new LocalIPFSProvider(localIPFSApi, localIPFSGateway))
-    : new IPFSService(new PinataProvider(pinataJwt, pinataGateway));
+  // Use centralized IPFS service selection
+  const ipfsService = getIPFSService();
 
   // Fetch all QIPs from blockchain
   const blockchainQIPsQuery = useQuery({

@@ -3,25 +3,20 @@ import { Link, useSearchParams } from 'react-router-dom'
 import Layout from '../layout'
 import { useQIP } from '../hooks/useQIP'
 import { ProposalEditor } from '../components/ProposalEditor'
+import { config } from '../config/env'
 
 const EditProposal: React.FC = () => {
   const [params] = useSearchParams()
   const qipParam = params.get('qip') || '0'
   const qipNumber = parseInt(qipParam, 10)
 
-  // Use Vite env vars with Gatsby fallbacks
-  const registryAddress = (import.meta.env.VITE_QIP_REGISTRY_ADDRESS || process.env.GATSBY_QIP_REGISTRY_ADDRESS) as `0x${string}`
-  const useLocalIPFS = (import.meta.env.VITE_USE_LOCAL_IPFS || process.env.GATSBY_USE_LOCAL_IPFS) === 'true'
-  const pinataJwt = import.meta.env.VITE_PINATA_JWT || process.env.GATSBY_PINATA_JWT || ''
-  const pinataGateway = import.meta.env.VITE_PINATA_GATEWAY || process.env.GATSBY_PINATA_GATEWAY || 'https://gateway.pinata.cloud'
-  const rpcUrl = import.meta.env.VITE_BASE_RPC_URL || process.env.GATSBY_BASE_RPC_URL || 'http://localhost:8545'
+  // Use config values
+  const registryAddress = config.qipRegistryAddress
+  const rpcUrl = config.baseRpcUrl
 
   const { data: qipData, isLoading, error } = useQIP({
     registryAddress,
     qipNumber,
-    useLocalIPFS,
-    pinataJwt,
-    pinataGateway,
     rpcUrl,
     enabled: !!registryAddress && qipNumber > 0,
   })
@@ -113,11 +108,6 @@ const EditProposal: React.FC = () => {
         <h1 className="text-3xl font-bold mb-6">Edit QIP-{qipNumber}</h1>
         <ProposalEditor
           registryAddress={registryAddress}
-          pinataJwt={pinataJwt}
-          pinataGateway={pinataGateway}
-          useLocalIPFS={useLocalIPFS}
-          localIPFSApi={import.meta.env.VITE_LOCAL_IPFS_API || process.env.GATSBY_LOCAL_IPFS_API || 'http://localhost:5001'}
-          localIPFSGateway={import.meta.env.VITE_LOCAL_IPFS_GATEWAY || process.env.GATSBY_LOCAL_IPFS_GATEWAY || 'http://localhost:8080'}
           rpcUrl={rpcUrl}
           existingQIP={existingQIP}
         />

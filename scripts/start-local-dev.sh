@@ -182,10 +182,8 @@ if [ "$USE_LOCAL_IPFS" = "true" ]; then
     echo -e "${GREEN}   Gateway: http://localhost:8080${NC}"
     echo -e "${GREEN}   Test CID: $TEST_CID${NC}"
 else
-    echo -e "${RED}❌ Local IPFS is disabled but required for development${NC}"
-    echo "Please set USE_LOCAL_IPFS=true in your environment"
-    echo "Or use: GATSBY_USE_LOCAL_IPFS=true in .env.local"
-    exit 1
+    echo -e "${YELLOW}📡 Using external IPFS provider (Mai API or Pinata)${NC}"
+    echo "Local IPFS daemon will not be started"
 fi
 
 # Load environment variables

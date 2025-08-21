@@ -4,6 +4,7 @@ import { sortBy } from 'lodash/fp'
 import { useQIPData } from '../hooks/useQIPData'
 import Layout from '../layout'
 import LocalModeBanner from '../components/LocalModeBanner'
+import { config } from '../config/env'
 
 // Map blockchain status strings to display strings
 const statusDisplayMap: Record<string, string> = {
@@ -22,12 +23,8 @@ const statusOrder = ['Draft', 'Review', 'Vote', 'Approved', 'Implemented', 'Reje
 
 const AllProposals: React.FC = () => {
   // Fetch blockchain data
-  // Use Vite env vars with fallback to Gatsby env vars
-  const registryAddress = (import.meta.env.VITE_QIP_REGISTRY_ADDRESS || process.env.GATSBY_QIP_REGISTRY_ADDRESS) as `0x${string}`
-  const useLocalIPFS = (import.meta.env.VITE_USE_LOCAL_IPFS || process.env.GATSBY_USE_LOCAL_IPFS) === 'true'
-  const pinataJwt = import.meta.env.VITE_PINATA_JWT || process.env.GATSBY_PINATA_JWT || ''
-  const pinataGateway = import.meta.env.VITE_PINATA_GATEWAY || process.env.GATSBY_PINATA_GATEWAY || 'https://gateway.pinata.cloud'
-  const localMode = (import.meta.env.VITE_LOCAL_MODE || process.env.GATSBY_LOCAL_MODE) === 'true'
+  const registryAddress = config.qipRegistryAddress
+  const localMode = config.localMode
 
   const { 
     blockchainQIPs, 
@@ -37,11 +34,6 @@ const AllProposals: React.FC = () => {
     isFetching
   } = useQIPData({
     registryAddress,
-    useLocalIPFS,
-    pinataJwt,
-    pinataGateway,
-    localIPFSApi: import.meta.env.VITE_LOCAL_IPFS_API || process.env.GATSBY_LOCAL_IPFS_API || 'http://localhost:5001',
-    localIPFSGateway: import.meta.env.VITE_LOCAL_IPFS_GATEWAY || process.env.GATSBY_LOCAL_IPFS_GATEWAY || 'http://localhost:8080',
     pollingInterval: 10000, // 10 seconds for faster updates in dev
     enabled: !!registryAddress
   })

@@ -1,7 +1,8 @@
 import { useMutation, useQueryClient, UseMutationOptions } from '@tanstack/react-query';
 import { useWalletClient } from 'wagmi';
 import { QIPClient, type QIPContent, QIPStatus } from '../services/qipClient';
-import { IPFSService, LocalIPFSProvider, PinataProvider } from '../services/ipfsService';
+import { IPFSService } from '../services/ipfsService';
+import { getIPFSService } from '../services/getIPFSService';
 
 interface UpdateQIPParams {
   qipNumber: bigint;
@@ -18,11 +19,6 @@ interface UpdateQIPResult {
 
 interface UseUpdateQIPOptions {
   registryAddress: `0x${string}`;
-  useLocalIPFS?: boolean;
-  pinataJwt?: string;
-  pinataGateway?: string;
-  localIPFSApi?: string;
-  localIPFSGateway?: string;
   mutationOptions?: Omit<UseMutationOptions<UpdateQIPResult, Error, UpdateQIPParams>, 'mutationFn'>;
 }
 
@@ -31,11 +27,6 @@ interface UseUpdateQIPOptions {
  */
 export function useUpdateQIP({
   registryAddress,
-  useLocalIPFS = false,
-  pinataJwt = '',
-  pinataGateway = 'https://gateway.pinata.cloud',
-  localIPFSApi = 'http://localhost:5001',
-  localIPFSGateway = 'http://localhost:8080',
   mutationOptions = {},
 }: UseUpdateQIPOptions) {
   const { data: walletClient } = useWalletClient();
@@ -43,9 +34,8 @@ export function useUpdateQIP({
 
   const qipClient = new QIPClient(registryAddress, 'http://localhost:8545', false);
   
-  const ipfsService = useLocalIPFS
-    ? new IPFSService(new LocalIPFSProvider(localIPFSApi, localIPFSGateway))
-    : new IPFSService(new PinataProvider(pinataJwt, pinataGateway));
+  // Use centralized IPFS service selection
+  const ipfsService = getIPFSService();
 
   return useMutation<UpdateQIPResult, Error, UpdateQIPParams>({
     mutationFn: async ({ qipNumber, content, newStatus }) => {

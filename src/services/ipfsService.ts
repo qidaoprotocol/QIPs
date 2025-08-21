@@ -196,6 +196,180 @@ export class PinataProvider implements IPFSProvider {
 }
 
 /**
+ * Mai API Provider - Uses mai-api endpoint for IPFS uploads (Pinata-compatible)
+ */
+export class MaiAPIProvider implements IPFSProvider {
+  private apiUrl: string;
+  
+  constructor(apiUrl: string = 'http://localhost:3001/v2/ipfs-upload') {
+    this.apiUrl = apiUrl;
+  }
+
+  async upload(content: string | Blob): Promise<string> {
+    // Convert Blob to string if needed
+    let contentString: string;
+    let isJson = false;
+    
+    if (content instanceof Blob) {
+      contentString = await content.text();
+    } else {
+      contentString = content;
+    }
+    
+    // Try to parse as JSON to determine the upload format
+    let jsonData: any = null;
+    try {
+      jsonData = JSON.parse(contentString);
+      isJson = true;
+    } catch {
+      // Not JSON, treat as plain text/markdown
+      isJson = false;
+    }
+    
+    let requestBody: any;
+    
+    if (isJson) {
+      // For JSON data, use Pinata's JSON upload format
+      // Check if it already has QIP structure
+      const hasQIPStructure = jsonData.qip !== undefined || jsonData.title !== undefined;
+      
+      if (hasQIPStructure) {
+        // Upload with metadata
+        requestBody = {
+          pinataContent: jsonData,
+          pinataMetadata: {
+            name: `QIP-${jsonData.qip || 'draft'}.json`,
+            keyvalues: {
+              type: 'qip-proposal',
+              qip: String(jsonData.qip || 'draft'),
+              network: jsonData.network || 'unknown',
+              author: jsonData.author || 'unknown'
+            }
+          },
+          pinataOptions: {
+            cidVersion: 1
+          }
+        };
+      } else {
+        // Direct JSON upload
+        requestBody = jsonData;
+      }
+    } else {
+      // For plain text/markdown, wrap it in a JSON structure
+      requestBody = {
+        pinataContent: {
+          content: contentString,
+          type: 'markdown'
+        },
+        pinataMetadata: {
+          name: 'QIP-content.json',
+          keyvalues: {
+            type: 'qip-content',
+            format: 'markdown'
+          }
+        },
+        pinataOptions: {
+          cidVersion: 1
+        }
+      };
+    }
+    
+    const response = await fetch(this.apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      const errorMessage = error.error?.details || error.error?.reason || error.error || response.statusText;
+      throw new Error(`Mai API upload failed: ${errorMessage}`);
+    }
+
+    const result = await response.json();
+    
+    // Check for Pinata-compatible response format
+    if (result.IpfsHash) {
+      return result.IpfsHash;
+    }
+    
+    // Fallback to old format
+    if (result.ipfsHash) {
+      return result.ipfsHash;
+    }
+    
+    throw new Error('Invalid response from Mai API: missing IPFS hash');
+  }
+
+  async fetch(cid: string): Promise<string> {
+    // In development mode with mock hashes (they start with Qm307... which is our mock prefix)
+    if (cid.startsWith('Qm307')) {
+      console.log('Development mode: Mock IPFS hash detected, returning placeholder content');
+      return `---
+qip: 999
+title: Mock Content
+network: Base
+status: Draft
+author: Development
+implementor: None
+implementation-date: None
+proposal: None
+created: 2024-01-01
+---
+
+# Mock Content
+
+This is placeholder content for development mode.`;
+    }
+    
+    // For fetching, we can use any public gateway or the one provided by mai-api
+    const gatewayUrl = `https://gateway.pinata.cloud/ipfs/${cid}`;
+    const response = await fetch(gatewayUrl);
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch from IPFS: ${response.statusText}`);
+    }
+    
+    const text = await response.text();
+    
+    // Try to parse as JSON and extract content if it's wrapped
+    try {
+      const json = JSON.parse(text);
+      if (json.content && typeof json.content === 'string') {
+        return json.content;
+      }
+      // If it's structured QIP data, format it as markdown
+      if (json.qip !== undefined) {
+        return this.formatQIPFromJSON(json);
+      }
+      // Otherwise return the JSON as-is
+      return text;
+    } catch {
+      // Not JSON, return as-is (probably markdown)
+      return text;
+    }
+  }
+  
+  private formatQIPFromJSON(data: any): string {
+    const frontmatter = [
+      `qip: ${data.qip || 'unknown'}`,
+      `title: ${data.title || 'Untitled'}`,
+      `network: ${data.network || 'unknown'}`,
+      `status: ${data.status || 'Draft'}`,
+      `author: ${data.author || 'unknown'}`,
+      `implementor: ${data.implementor || 'None'}`,
+      `implementation-date: ${data['implementation-date'] || 'None'}`,
+      `proposal: ${data.proposal || 'None'}`,
+      `created: ${data.created || new Date().toISOString().split('T')[0]}`
+    ].join('\n');
+    
+    return `---\n${frontmatter}\n---\n\n${data.content || ''}`;
+  }
+}
+
+/**
  * Main IPFS service for managing QIPs
  */
 export class IPFSService {
@@ -287,7 +461,24 @@ ${qipData.content}`;
       ? cidOrUrl.slice(7) 
       : cidOrUrl;
     
-    return await this.provider.fetch(cid);
+    const rawContent = await this.provider.fetch(cid);
+    
+    // Check if content is JSON-wrapped (happens with some IPFS providers)
+    try {
+      const parsed = JSON.parse(rawContent);
+      
+      // If it's an object with a 'content' field, unwrap it
+      if (typeof parsed === 'object' && parsed !== null && 'content' in parsed) {
+        console.debug(`Unwrapping JSON-wrapped content for CID: ${cid}`);
+        return parsed.content;
+      }
+      
+      // If it's some other JSON structure, return as-is
+      return rawContent;
+    } catch {
+      // Not JSON, return raw content
+      return rawContent;
+    }
   }
 
   /**
@@ -323,10 +514,26 @@ ${qipData.content}`;
     frontmatter: Record<string, any>;
     content: string;
   } {
+    // Ensure we have a string to work with
+    if (typeof markdown !== 'string') {
+      console.error('parseQIPMarkdown received non-string:', typeof markdown, markdown);
+      throw new Error('Invalid QIP format: expected string content');
+    }
+    
+    // Trim whitespace
+    markdown = markdown.trim();
+    
+    if (!markdown) {
+      throw new Error('Invalid QIP format: empty content');
+    }
+    
+    // Check for frontmatter
     const match = markdown.match(/^---\n([\s\S]+?)\n---\n([\s\S]*)$/);
     
     if (!match) {
-      throw new Error('Invalid QIP format: missing frontmatter');
+      // Log the first 200 chars for debugging
+      console.error('Failed to parse QIP markdown. First 200 chars:', markdown.substring(0, 200));
+      throw new Error('Invalid QIP format: missing frontmatter. Content must start with "---" delimiter');
     }
     
     const yamlContent = match[1];
@@ -341,7 +548,8 @@ ${qipData.content}`;
       if (colonIndex > 0) {
         const key = line.slice(0, colonIndex).trim();
         const value = line.slice(colonIndex + 1).trim();
-        frontmatter[key] = value;
+        // Restore the None -> null conversion
+        frontmatter[key] = value === 'None' ? null : value;
       }
     }
     

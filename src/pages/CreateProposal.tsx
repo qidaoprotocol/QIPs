@@ -10,11 +10,6 @@ const CreateProposal: React.FC = () => {
       <div className="container mx-auto py-8">
         <ProposalEditor 
           registryAddress={config.qipRegistryAddress}
-          pinataJwt={config.pinataJwt}
-          pinataGateway={config.pinataGateway}
-          useLocalIPFS={config.useLocalIPFS}
-          localIPFSApi={config.localIPFSApi}
-          localIPFSGateway={config.localIPFSGateway}
           rpcUrl={config.baseRpcUrl}
         />
       </div>

@@ -19,6 +19,7 @@
     "migrate:original-numbers-dev": "bun run scripts/migrate-with-original-numbers-dev.ts",
     "migrate:local-ipfs:dry": "bun run scripts/migrate-to-local-ipfs.ts --dry-run",
     "dev:local": "./scripts/start-local-dev.sh",
+    "dev:mai": "./scripts/with-mai-api.sh",
     "develop": "vite",
     "start": "vite",
     "serve": "vite preview",

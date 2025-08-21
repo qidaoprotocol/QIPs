@@ -1,15 +1,11 @@
 import { useQuery, UseQueryOptions } from '@tanstack/react-query';
 import { QIPClient, QIPStatus } from '../services/qipClient';
-import { IPFSService, LocalIPFSProvider, PinataProvider } from '../services/ipfsService';
+import { IPFSService } from '../services/ipfsService';
+import { getIPFSService } from '../services/getIPFSService';
 import { QIPData } from './useQIPData';
 
 interface UseQIPListOptions {
   registryAddress: `0x${string}`;
-  useLocalIPFS?: boolean;
-  pinataJwt?: string;
-  pinataGateway?: string;
-  localIPFSApi?: string;
-  localIPFSGateway?: string;
   status?: QIPStatus;
   author?: string;
   network?: string;
@@ -23,11 +19,6 @@ interface UseQIPListOptions {
  */
 export function useQIPList({
   registryAddress,
-  useLocalIPFS = false,
-  pinataJwt = '',
-  pinataGateway = 'https://gateway.pinata.cloud',
-  localIPFSApi = 'http://localhost:5001',
-  localIPFSGateway = 'http://localhost:8080',
   status,
   author,
   network,
@@ -37,9 +28,8 @@ export function useQIPList({
 }: UseQIPListOptions) {
   const qipClient = new QIPClient(registryAddress, 'http://localhost:8545', false);
   
-  const ipfsService = useLocalIPFS
-    ? new IPFSService(new LocalIPFSProvider(localIPFSApi, localIPFSGateway))
-    : new IPFSService(new PinataProvider(pinataJwt, pinataGateway));
+  // Use centralized IPFS service selection
+  const ipfsService = getIPFSService();
 
   return useQuery<QIPData[]>({
     queryKey: ['qips', 'list', registryAddress, { status, author, network }],
