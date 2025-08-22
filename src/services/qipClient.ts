@@ -1,5 +1,6 @@
 import { createPublicClient, createWalletClient, http, type PublicClient, type WalletClient, type Hash, keccak256, toBytes, type Address } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
+import { loadBalance, getRPCEndpoints } from '../utils/loadBalance';
 
 const QIP_REGISTRY_ABI = [
   {
@@ -177,9 +178,24 @@ export class QIPClient {
     
     console.log("- Using chain:", chain.name, "with ID:", chain.id);
     
+    // Create load balanced transport with multiple RPC endpoints
+    const rpcEndpoints = rpcUrl ? [rpcUrl] : getRPCEndpoints();
+    console.log(`- Using ${rpcEndpoints.length} RPC endpoints with load balancing`);
+    
+    const transport = rpcEndpoints.length > 1
+      ? loadBalance(rpcEndpoints.map(url => http(url)))
+      : http(rpcEndpoints[0]);
+    
     this.publicClient = createPublicClient({
       chain,
-      transport: http(rpcUrl)
+      transport,
+      batch: {
+        multicall: {
+          batchSize: 5, // Reduced to avoid gas limits
+          wait: 10, // Wait 10ms to batch requests
+        },
+      },
+      pollingInterval: 4_000, // Poll every 4 seconds
     });
     
     console.log("- PublicClient created:", !!this.publicClient);
@@ -429,6 +445,150 @@ ${qipData.content}`;
       snapshotProposalId: result[11],
       version: result[12]
     };
+  }
+
+  /**
+   * Get multiple QIPs using multicall for efficiency
+   */
+  async getQIPsBatch(qipNumbers: bigint[]): Promise<QIP[]> {
+    if (qipNumbers.length === 0) return [];
+
+    // Limit batch size to avoid gas limits (each QIP read uses ~30k gas)
+    const MAX_BATCH_SIZE = 5; // Reduced from 10 to stay well under 1M gas limit
+    
+    if (qipNumbers.length > MAX_BATCH_SIZE) {
+      // Split into smaller batches if needed
+      const results: QIP[] = [];
+      for (let i = 0; i < qipNumbers.length; i += MAX_BATCH_SIZE) {
+        const batch = qipNumbers.slice(i, Math.min(i + MAX_BATCH_SIZE, qipNumbers.length));
+        const batchResults = await this.getQIPsBatch(batch);
+        results.push(...batchResults);
+      }
+      return results;
+    }
+
+    // Create contract calls for multicall
+    const calls = qipNumbers.map(qipNumber => ({
+      address: this.contractAddress,
+      abi: QIP_REGISTRY_ABI,
+      functionName: 'qips',
+      args: [qipNumber],
+      gas: 100000n // Explicit gas limit per call
+    }));
+
+    try {
+      // Use multicall to batch all requests into a single RPC call
+      const results = await this.publicClient.multicall({
+        contracts: calls,
+        allowFailure: true, // Allow individual calls to fail without failing the entire batch
+        gas: 500000n // Total gas limit for the multicall
+      });
+
+      const qips: QIP[] = [];
+      
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i];
+        if (result.status === 'success' && result.result) {
+          const data = result.result as any;
+          qips.push({
+            qipNumber: data[0],
+            author: data[1],
+            title: data[2],
+            network: data[3],
+            contentHash: data[4],
+            ipfsUrl: data[5],
+            createdAt: data[6],
+            lastUpdated: data[7],
+            status: data[8] as QIPStatus,
+            implementor: data[9],
+            implementationDate: data[10],
+            snapshotProposalId: data[11],
+            version: data[12]
+          });
+        }
+      }
+
+      return qips;
+    } catch (error) {
+      console.error('Error in multicall batch:', error);
+      // Fallback to individual calls if multicall fails
+      const qips: QIP[] = [];
+      for (const qipNumber of qipNumbers) {
+        try {
+          const qip = await this.getQIP(qipNumber);
+          qips.push(qip);
+        } catch (e) {
+          console.error(`Failed to fetch QIP ${qipNumber}:`, e);
+        }
+      }
+      return qips;
+    }
+  }
+
+  /**
+   * Get all QIPs by status using multicall for efficiency
+   */
+  async getAllQIPsByStatusBatch(): Promise<Map<QIPStatus, bigint[]>> {
+    const statuses: QIPStatus[] = [
+      QIPStatus.Draft,
+      QIPStatus.ReviewPending,
+      QIPStatus.VotePending,
+      QIPStatus.Approved,
+      QIPStatus.Rejected,
+      QIPStatus.Implemented,
+      QIPStatus.Superseded,
+      QIPStatus.Withdrawn,
+    ];
+
+    // Split status queries into smaller batches to avoid gas limits
+    const BATCH_SIZE = 4; // Each getQIPsByStatus can return many items, so keep batch small
+    const statusMap = new Map<QIPStatus, bigint[]>();
+    
+    for (let i = 0; i < statuses.length; i += BATCH_SIZE) {
+      const batchStatuses = statuses.slice(i, Math.min(i + BATCH_SIZE, statuses.length));
+      
+      // Create calls for this batch of statuses
+      const calls = batchStatuses.map(status => ({
+        address: this.contractAddress,
+        abi: QIP_REGISTRY_ABI,
+        functionName: 'getQIPsByStatus',
+        args: [status],
+        gas: 200000n // Gas limit per call
+      }));
+
+      try {
+        // Batch status queries with gas limit
+        const results = await this.publicClient.multicall({
+          contracts: calls,
+          allowFailure: true,
+          gas: 900000n // Total gas limit for multicall
+        });
+        
+        for (let j = 0; j < results.length; j++) {
+          const result = results[j];
+          const status = batchStatuses[j];
+          
+          if (result.status === 'success' && result.result) {
+            statusMap.set(status, result.result as bigint[]);
+          } else {
+            statusMap.set(status, []);
+          }
+        }
+      } catch (error) {
+        console.error('Error in status multicall batch:', error);
+        // Fallback to individual calls for this batch
+        for (const status of batchStatuses) {
+          try {
+            const qips = await this.getQIPsByStatus(status);
+            statusMap.set(status, qips);
+          } catch (e) {
+            statusMap.set(status, []);
+          }
+        }
+      }
+    }
+    
+    return statusMap;
   }
 
   /**

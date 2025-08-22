@@ -256,6 +256,15 @@ contract QIPRegistry is AccessControl, Pausable {
         QIP storage qip = qips[_qipNumber];
         require(qip.qipNumber > 0, "QIP does not exist");
         require(bytes(qip.snapshotProposalId).length == 0, "Snapshot already linked");
+        require(bytes(_snapshotProposalId).length > 0, "Invalid snapshot ID");
+        
+        // Reject placeholder values
+        require(
+            keccak256(bytes(_snapshotProposalId)) != keccak256(bytes("TBU")) &&
+            keccak256(bytes(_snapshotProposalId)) != keccak256(bytes("tbu")) &&
+            keccak256(bytes(_snapshotProposalId)) != keccak256(bytes("None")),
+            "Invalid snapshot ID: placeholder value"
+        );
         
         qip.snapshotProposalId = _snapshotProposalId;
         qip.status = QIPStatus.VotePending;
@@ -263,6 +272,38 @@ contract QIPRegistry is AccessControl, Pausable {
         
         emit SnapshotProposalLinked(_qipNumber, _snapshotProposalId);
         emit QIPStatusChanged(_qipNumber, qip.status, QIPStatus.VotePending);
+    }
+
+    /**
+     * @dev Clear invalid snapshot ID (admin only)
+     * This allows fixing QIPs that have placeholder values like "TBU" stored
+     */
+    function clearInvalidSnapshotId(uint256 _qipNumber) 
+        external 
+        onlyRole(DEFAULT_ADMIN_ROLE) 
+    {
+        QIP storage qip = qips[_qipNumber];
+        require(qip.qipNumber > 0, "QIP does not exist");
+        require(bytes(qip.snapshotProposalId).length > 0, "No snapshot ID to clear");
+        
+        // Only clear if it's a placeholder value
+        require(
+            keccak256(bytes(qip.snapshotProposalId)) == keccak256(bytes("TBU")) ||
+            keccak256(bytes(qip.snapshotProposalId)) == keccak256(bytes("tbu")) ||
+            keccak256(bytes(qip.snapshotProposalId)) == keccak256(bytes("None")) ||
+            keccak256(bytes(qip.snapshotProposalId)) == keccak256(bytes("TBD")),
+            "Can only clear placeholder values"
+        );
+        
+        // Clear the snapshot ID and reset status to Draft if it was VotePending
+        qip.snapshotProposalId = "";
+        if (qip.status == QIPStatus.VotePending) {
+            qip.status = QIPStatus.Draft;
+            emit QIPStatusChanged(_qipNumber, QIPStatus.VotePending, QIPStatus.Draft);
+        }
+        qip.lastUpdated = block.timestamp;
+        
+        emit SnapshotProposalLinked(_qipNumber, "");
     }
 
     /**

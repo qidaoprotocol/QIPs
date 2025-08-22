@@ -1,8 +1,10 @@
+import React from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePublicClient } from 'wagmi';
 import { QIPClient, QIPStatus } from '../services/qipClient';
 import { IPFSService } from '../services/ipfsService';
 import { getIPFSService } from '../services/getIPFSService';
+import { config } from '../config/env';
 
 export interface QIPData {
   qipNumber: number;
@@ -44,10 +46,13 @@ export function useQIPData(options: UseQIPDataOptions = {}) {
   const publicClient = usePublicClient();
   const queryClient = useQueryClient();
 
-  // Initialize services
-  const qipClient = registryAddress 
-    ? new QIPClient(registryAddress, 'http://localhost:8545', false)
-    : null;
+  // Initialize services (memoized to avoid recreating on every render)
+  const qipClient = React.useMemo(() => 
+    registryAddress 
+      ? new QIPClient(registryAddress, undefined, false) // Let QIPClient use load balancing
+      : null,
+    [registryAddress]
+  );
 
   // Use centralized IPFS service selection
   const ipfsService = getIPFSService();
@@ -64,59 +69,84 @@ export function useQIPData(options: UseQIPDataOptions = {}) {
       }
 
       const qips: QIPData[] = [];
-      // Query all statuses, union the QIP numbers, then fetch each QIP
-      const statuses: QIPStatus[] = [
-        QIPStatus.Draft,
-        QIPStatus.ReviewPending,
-        QIPStatus.VotePending,
-        QIPStatus.Approved,
-        QIPStatus.Rejected,
-        QIPStatus.Implemented,
-        QIPStatus.Superseded,
-        QIPStatus.Withdrawn,
-      ];
-
-      const numbers = new Set<number>();
-      for (const status of statuses) {
-        try {
-          const arr = await qipClient.getQIPsByStatus(status);
-          arr.forEach((n) => numbers.add(Number(n)));
-        } catch (e) {
-          console.warn("[useQIPData] getQIPsByStatus failed for status", status, e);
-        }
+      
+      // Step 1: Get all QIP numbers by status in a single multicall
+      console.log("[useQIPData] Fetching all QIPs by status using multicall...");
+      const statusMap = await qipClient.getAllQIPsByStatusBatch();
+      
+      // Collect all unique QIP numbers
+      const numbers = new Set<bigint>();
+      for (const qipNumbers of statusMap.values()) {
+        qipNumbers.forEach(n => numbers.add(n));
+      }
+      
+      console.log(`[useQIPData] Found ${numbers.size} unique QIPs across all statuses`);
+      
+      if (numbers.size === 0) {
+        return [];
       }
 
-      const sorted = Array.from(numbers).sort((a, b) => a - b);
-      for (const num of sorted) {
+      // Step 2: Batch fetch all QIPs in chunks to avoid overwhelming the RPC
+      const BATCH_SIZE = 5; // Reduced to 5 to avoid gas limits
+      const sortedNumbers = Array.from(numbers).sort((a, b) => Number(a - b));
+      
+      for (let i = 0; i < sortedNumbers.length; i += BATCH_SIZE) {
+        const batch = sortedNumbers.slice(i, Math.min(i + BATCH_SIZE, sortedNumbers.length));
+        console.log(`[useQIPData] Fetching batch ${Math.floor(i/BATCH_SIZE) + 1}/${Math.ceil(sortedNumbers.length/BATCH_SIZE)} (${batch.length} QIPs)`);
+        
         try {
-          const qip = await qipClient.getQIP(BigInt(num));
-          if (!qip || qip.qipNumber === 0n) continue;
+          // Fetch QIP data using multicall
+          const batchQIPs = await qipClient.getQIPsBatch(batch);
+          
+          // Process each QIP with IPFS content
+          for (const qip of batchQIPs) {
+            if (!qip || qip.qipNumber === 0n) continue;
+            
+            try {
+              const ipfsContent = await ipfsService.fetchQIP(qip.ipfsUrl);
+              const { frontmatter, content } = ipfsService.parseQIPMarkdown(ipfsContent);
 
-          const ipfsContent = await ipfsService.fetchQIP(qip.ipfsUrl);
-          const { frontmatter, content } = ipfsService.parseQIPMarkdown(ipfsContent);
+              const implDate =
+                qip.implementationDate > 0n 
+                  ? new Date(Number(qip.implementationDate) * 1000).toISOString().split("T")[0] 
+                  : "None";
 
-          const implDate =
-            qip.implementationDate > 0n ? new Date(Number(qip.implementationDate) * 1000).toISOString().split("T")[0] : "None";
-
-          qips.push({
-            qipNumber: num,
-            title: qip.title,
-            network: qip.network,
-            status: qipClient.getStatusString(qip.status),
-            author: frontmatter.author || qip.author,
-            implementor: qip.implementor,
-            implementationDate: implDate,
-            proposal: qip.snapshotProposalId || "None",
-            created: frontmatter.created || new Date(Number(qip.createdAt) * 1000).toISOString().split("T")[0],
-            content,
-            ipfsUrl: qip.ipfsUrl,
-            contentHash: qip.contentHash,
-            version: Number(qip.version),
-            source: "blockchain",
-            lastUpdated: Date.now(),
-          });
+              qips.push({
+                qipNumber: Number(qip.qipNumber),
+                title: qip.title,
+                network: qip.network,
+                status: qipClient.getStatusString(qip.status),
+                author: frontmatter.author || qip.author,
+                implementor: qip.implementor,
+                implementationDate: implDate,
+                // Filter out TBU and other placeholders
+                proposal: (qip.snapshotProposalId && 
+                          qip.snapshotProposalId !== 'TBU' && 
+                          qip.snapshotProposalId !== 'tbu' &&
+                          qip.snapshotProposalId !== 'None') 
+                          ? qip.snapshotProposalId 
+                          : 'None',
+                created: frontmatter.created || new Date(Number(qip.createdAt) * 1000).toISOString().split("T")[0],
+                content,
+                ipfsUrl: qip.ipfsUrl,
+                contentHash: qip.contentHash,
+                version: Number(qip.version),
+                source: "blockchain",
+                lastUpdated: Date.now(),
+              });
+            } catch (error) {
+              console.error(`[useQIPData] Error processing QIP ${qip.qipNumber}:`, error);
+            }
+          }
+          
+          // Add progressive delay between batches to avoid rate limiting
+          if (i + BATCH_SIZE < sortedNumbers.length) {
+            // Exponential backoff: 100ms, 200ms, 300ms, etc.
+            const delay = Math.min(100 * (Math.floor(i/BATCH_SIZE) + 1), 500);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
         } catch (error) {
-          console.error(`[useQIPData] Error fetching QIP ${num}:`, error);
+          console.error(`[useQIPData] Error fetching batch:`, error);
         }
       }
 
@@ -155,7 +185,13 @@ export function useQIPData(options: UseQIPDataOptions = {}) {
             author: frontmatter.author || qip.author,
             implementor: qip.implementor,
             implementationDate: implDate,
-            proposal: qip.snapshotProposalId || 'None',
+            // Filter out TBU and other placeholders
+            proposal: (qip.snapshotProposalId && 
+                      qip.snapshotProposalId !== 'TBU' && 
+                      qip.snapshotProposalId !== 'tbu' &&
+                      qip.snapshotProposalId !== 'None') 
+                      ? qip.snapshotProposalId 
+                      : 'None',
             created: frontmatter.created || new Date(Number(qip.createdAt) * 1000).toISOString().split('T')[0],
             content,
             ipfsUrl: qip.ipfsUrl,

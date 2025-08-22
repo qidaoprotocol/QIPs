@@ -93,8 +93,8 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
 
   useEffect(() => {
     if (registryAddress) {
-      console.log("🔧 Initializing QIPClient with RPC:", rpcUrl || "http://localhost:8545");
-      const client = new QIPClient(registryAddress, rpcUrl || "http://localhost:8545");
+      console.log("🔧 Initializing QIPClient with RPC:", rpcUrl || config.baseRpcUrl);
+      const client = new QIPClient(registryAddress, rpcUrl || config.baseRpcUrl);
       setQipClient(client);
     }
 

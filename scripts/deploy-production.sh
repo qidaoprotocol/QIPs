@@ -19,7 +19,7 @@ NC='\033[0m' # No Color
 KEYSTORE_ACCOUNT="mainnet-deployer"
 NETWORK="base-mainnet"
 DEPLOYMENT_DIR="deployments"
-REQUIRED_BALANCE="0.01" # ETH
+REQUIRED_BALANCE="0.002" # ETH (Base has low gas costs)
 DRY_RUN=false
 VERIFY_CONTRACT=false
 COMPUTE_ONLY=false
@@ -191,7 +191,10 @@ else
 fi
 
 # Check if Basescan API key is configured in Foundry
-if forge config | grep -q "etherscan.base.key = \"\"" || ! forge config | grep -q "etherscan.base.key"; then
+# Extract the key value from forge config
+BASESCAN_KEY=$(forge config | grep -A 1 "\[etherscan.base\]" | grep "key = " | cut -d'"' -f2)
+
+if [ -z "$BASESCAN_KEY" ] || [ "$BASESCAN_KEY" = "" ]; then
     echo -e "${YELLOW}  ⚠️  No Basescan API key found in ~/.foundry/foundry.toml${NC}"
     echo -e "${YELLOW}      Contract verification will be skipped${NC}"
     VERIFY_ON_BASESCAN=false
@@ -248,6 +251,42 @@ if [ $? -eq 0 ]; then
 else
     echo -e "${RED}  ❌ Contract compilation failed${NC}"
     exit 1
+fi
+
+# Estimate deployment gas cost (only if not in compute-only mode)
+if [ "$COMPUTE_ONLY" = false ]; then
+    echo -e "\n${YELLOW}Estimating deployment gas cost...${NC}"
+    
+    # Run forge script in simulation mode to get gas estimate
+    GAS_ESTIMATE_OUTPUT=$(INITIAL_ADMIN=$DEPLOYER_ADDRESS forge script script/DeployWithStandardCreate2.s.sol:DeployWithStandardCreate2 \
+        --rpc-url $BASE_RPC_URL \
+        --sender $DEPLOYER_ADDRESS \
+        2>&1 | grep -E "gas used|Transaction successfully executed" || echo "")
+    
+    # Extract gas used from the output (typically shows as "gas used: XXXXXX")
+    GAS_USED=$(echo "$GAS_ESTIMATE_OUTPUT" | grep -oE "gas used: [0-9]+" | grep -oE "[0-9]+" | head -1)
+    
+    if [ -n "$GAS_USED" ]; then
+        # Get current gas price on Base
+        GAS_PRICE=$(cast gas-price --rpc-url $BASE_RPC_URL 2>/dev/null || echo "1000000000") # Default to 1 gwei
+        
+        # Calculate estimated cost in ETH (gas_used * gas_price / 10^18)
+        # Add 20% buffer for gas price fluctuations
+        ESTIMATED_COST_WEI=$(echo "$GAS_USED * $GAS_PRICE * 1.2" | bc | cut -d'.' -f1)
+        ESTIMATED_COST_ETH=$(echo "scale=6; $ESTIMATED_COST_WEI / 1000000000000000000" | bc 2>/dev/null || echo "0.002")
+        
+        echo -e "${GREEN}  ✅ Estimated deployment cost: ${BOLD}$ESTIMATED_COST_ETH ETH${NC}"
+        echo -e "     Gas units: $GAS_USED"
+        echo -e "     Gas price: $(echo "scale=2; $GAS_PRICE / 1000000000" | bc) gwei"
+        
+        # Update required balance if estimate is higher
+        if (( $(echo "$ESTIMATED_COST_ETH > $REQUIRED_BALANCE" | bc -l) )); then
+            REQUIRED_BALANCE=$ESTIMATED_COST_ETH
+            echo -e "${YELLOW}  ⚠️  Updating required balance to estimated cost${NC}"
+        fi
+    else
+        echo -e "${YELLOW}  ⚠️  Could not estimate gas cost, using default requirement${NC}"
+    fi
 fi
 
 # ============================================
@@ -323,7 +362,11 @@ if [ "$DRY_RUN" = false ] && [ "$SKIP_CONFIRMATION" = false ]; then
     echo "You are about to deploy to Base Mainnet."
     echo "This action will consume real ETH and is irreversible."
     echo ""
-    echo -e "${BOLD}Estimated gas cost: ~0.005 ETH${NC}"
+    if [ -n "$ESTIMATED_COST_ETH" ]; then
+        echo -e "${BOLD}Estimated gas cost: $ESTIMATED_COST_ETH ETH${NC}"
+    else
+        echo -e "${BOLD}Estimated gas cost: ~0.002 ETH${NC}"
+    fi
     echo ""
     read -p "Type 'DEPLOY' to proceed or anything else to cancel: " CONFIRM
 
@@ -508,8 +551,7 @@ echo "   ${CYAN}gh secret set QIP_REGISTRY_ADDRESS --body \"$REGISTRY_ADDRESS\"$
 echo "   ${CYAN}gh secret set BASE_RPC_URL --body \"$BASE_RPC_URL\"${NC}"
 echo ""
 echo "2. Migrate existing QIPs (if needed):"
-echo "   ${CYAN}export VITE_QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS${NC}"
-echo "   ${CYAN}bun run migrate:qips${NC}"
+echo "   ${CYAN}./scripts/migrate-with-keystore.sh --account=$KEYSTORE_ACCOUNT${NC}"
 echo ""
 echo "3. Deploy frontend:"
 echo "   ${CYAN}git add -A && git commit -m \"Deploy registry to $REGISTRY_ADDRESS\"${NC}"

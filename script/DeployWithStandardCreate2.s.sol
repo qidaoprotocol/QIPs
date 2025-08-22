@@ -17,14 +17,16 @@ contract DeployWithStandardCreate2 is Script {
     bytes32 constant SALT = keccak256("QIPRegistry.v1.base");
     
     function run() public returns (address) {
-        // Derive deployer and initial admin from env vars for production safety
-        // PRIVATE_KEY is required; INITIAL_ADMIN is optional (defaults to deployer EOA)
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        // When using keystore (--account flag), msg.sender is the authenticated account
+        // INITIAL_ADMIN can override this if needed
         address initialAdmin;
         try vm.envAddress("INITIAL_ADMIN") returns (address a) {
             initialAdmin = a;
+            console.log("Using INITIAL_ADMIN from env:", initialAdmin);
         } catch {
-            initialAdmin = vm.addr(deployerPrivateKey);
+            // Default to the account that's broadcasting (keystore account)
+            initialAdmin = msg.sender;
+            console.log("Using keystore account as admin:", initialAdmin);
         }
         
         // Get the bytecode with constructor args
@@ -43,7 +45,8 @@ contract DeployWithStandardCreate2 is Script {
         }
         
         // Deploy using CREATE2
-        vm.startBroadcast(deployerPrivateKey);
+        // When using --account, this broadcasts with the keystore account
+        vm.startBroadcast();
         
         // Call the CREATE2 deployer
         // The deployer expects: salt (32 bytes) + initcode

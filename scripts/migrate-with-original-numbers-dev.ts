@@ -217,7 +217,13 @@ async function migrateQIP(
           mapStatus(parsed.frontmatter.status || 'Draft'),
           parsed.frontmatter.implementor || 'None',
           BigInt(implementationDate),
-          parsed.frontmatter.proposal || ''
+          // Filter out TBU and None as they're placeholders
+          (parsed.frontmatter.proposal && 
+           parsed.frontmatter.proposal !== 'TBU' && 
+           parsed.frontmatter.proposal !== 'None' &&
+           parsed.frontmatter.proposal.toLowerCase() !== 'tbu') 
+            ? parsed.frontmatter.proposal 
+            : ''
         ]
       });
       

@@ -1,5 +1,10 @@
 import React from 'react';
 import Author from './Author';
+import { useQueryClient } from '@tanstack/react-query';
+import { QIPClient } from '../services/qipClient';
+import { getIPFSService } from '../services/getIPFSService';
+import { config } from '../config/env';
+import { CACHE_TIMES } from '../config/queryClient';
 // Proposal list item component
 
 const statusColor:any = {
@@ -14,6 +19,75 @@ const statusColor:any = {
 
 const ProposalListItem = (props: any) => {
     const { proposals } = props;
+    const queryClient = useQueryClient();
+    const ipfsService = getIPFSService();
+    
+    // Prefetch QIP data on hover
+    const handleMouseEnter = async (qipNumber: number) => {
+        const registryAddress = config.qipRegistryAddress;
+        if (!registryAddress) return;
+        
+        // Check if already cached
+        const cacheKey = ['qip', qipNumber, registryAddress];
+        const cached = queryClient.getQueryData(cacheKey);
+        
+        if (!cached) {
+            console.debug(`[ProposalListItem] Prefetching QIP ${qipNumber} on hover`);
+            
+            // Prefetch the QIP data
+            queryClient.prefetchQuery({
+                queryKey: cacheKey,
+                queryFn: async () => {
+                    const qipClient = new QIPClient(registryAddress, undefined, false);
+                    const qip = await qipClient.getQIP(BigInt(qipNumber));
+                    
+                    if (!qip || qip.qipNumber === 0n) return null;
+                    
+                    // Also prefetch IPFS content
+                    const ipfsContent = await ipfsService.fetchQIP(qip.ipfsUrl);
+                    const { frontmatter, content } = ipfsService.parseQIPMarkdown(ipfsContent);
+                    
+                    // Cache IPFS separately
+                    queryClient.setQueryData(['ipfs', qip.ipfsUrl], {
+                        raw: ipfsContent,
+                        frontmatter,
+                        body: content,
+                        cid: qip.ipfsUrl,
+                    });
+                    
+                    const implDate = qip.implementationDate > 0n 
+                        ? new Date(Number(qip.implementationDate) * 1000).toISOString().split('T')[0]
+                        : 'None';
+                    
+                    return {
+                        qipNumber,
+                        title: qip.title,
+                        network: qip.network,
+                        status: qipClient.getStatusString(qip.status),
+                        author: frontmatter.author || qip.author,
+                        implementor: qip.implementor,
+                        implementationDate: implDate,
+                        // Filter out TBU and other placeholders
+                        proposal: (qip.snapshotProposalId && 
+                                  qip.snapshotProposalId !== 'TBU' && 
+                                  qip.snapshotProposalId !== 'tbu' &&
+                                  qip.snapshotProposalId !== 'None') 
+                                  ? qip.snapshotProposalId 
+                                  : 'None',
+                        created: frontmatter.created || new Date(Number(qip.createdAt) * 1000).toISOString().split('T')[0],
+                        content,
+                        ipfsUrl: qip.ipfsUrl,
+                        contentHash: qip.contentHash,
+                        version: Number(qip.version),
+                        source: 'blockchain' as const,
+                        lastUpdated: Date.now()
+                    };
+                },
+                staleTime: CACHE_TIMES.STALE_TIME.QIP_DETAIL,
+                gcTime: CACHE_TIMES.GC_TIME.QIP_DETAIL,
+            });
+        }
+    };
 
     // Helper function to get data from proposal (handles both markdown and blockchain structures)
     const getProposalData = (proposal: any) => {
@@ -81,6 +155,7 @@ const ProposalListItem = (props: any) => {
                                         <a
                                             href={`/qips/QIP-${data.qip}`}
                                             className="cursor-pointer"
+                                            onMouseEnter={() => handleMouseEnter(data.qip)}
                                         >
                                             <div className="relative flex mb-1 mt-3 break-words pr-[80px] leading-[32px]">
                                                 {/* <span className='mr-1'>

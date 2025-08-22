@@ -22,9 +22,9 @@ const getEnvVar = (key: string, defaultValue = ""): string => {
 
   const result = value || defaultValue;
 
-  // Debug critical IPFS config values
-  if (key.includes("IPFS") || key.includes("MAI")) {
-    console.debug(`Env var ${key}: ${result}`);
+  // Debug critical config values
+  if (key.includes("IPFS") || key.includes("MAI") || key.includes("BASE_RPC")) {
+    console.debug(`Env var ${key}: ${result || '(using default: ' + defaultValue + ')'}`);
   }
 
   return result;

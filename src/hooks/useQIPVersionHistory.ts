@@ -1,5 +1,6 @@
 import { useQuery, UseQueryOptions } from '@tanstack/react-query';
 import { QIPClient } from '../services/qipClient';
+import { config } from '../config/env';
 
 interface QIPVersion {
   version: number;
@@ -24,7 +25,7 @@ export function useQIPVersionHistory({
   enabled = true,
   queryOptions = {},
 }: UseQIPVersionHistoryOptions) {
-  const qipClient = new QIPClient(registryAddress, 'http://localhost:8545', false);
+  const qipClient = new QIPClient(registryAddress, config.baseRpcUrl, false);
 
   return useQuery<QIPVersion[]>({
     queryKey: ['qip', 'versions', qipNumber, registryAddress],

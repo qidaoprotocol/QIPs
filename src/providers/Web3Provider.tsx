@@ -1,10 +1,11 @@
 import React from 'react'
 import { WagmiProvider, createConfig, http } from 'wagmi'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClientProvider } from '@tanstack/react-query'
 import { ConnectKitProvider } from 'connectkit'
 import { mainnet } from 'wagmi/chains'
 import { injected, walletConnect } from 'wagmi/connectors'
 import { config, getChains, getDefaultChainId, localBaseFork } from '../config'
+import { createQueryClient, setupPersistentCache } from '../config/queryClient'
 
 // Get chains from config
 const chains = getChains()
@@ -33,20 +34,13 @@ const wagmiConfig = createConfig({
   ],
 })
 
-// Query client with optimized settings for blockchain data
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 30 * 1000, // 30 seconds - shorter for blockchain data
-      gcTime: 5 * 60 * 1000, // 5 minutes
-      retry: 3,
-      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
-    },
-    mutations: {
-      retry: 1, // Only retry mutations once
-    },
-  },
-})
+// Create query client with optimized caching
+const queryClient = createQueryClient()
+
+// Setup persistent caching to localStorage
+if (typeof window !== 'undefined') {
+  setupPersistentCache(queryClient)
+}
 
 interface Web3ProviderProps {
   children: React.ReactNode

@@ -30,7 +30,7 @@ export function useCreateQIP({
   const { data: walletClient } = useWalletClient();
   const queryClient = useQueryClient();
 
-  const qipClient = new QIPClient(registryAddress, 'http://localhost:8545', false);
+  const qipClient = new QIPClient(registryAddress, config.baseRpcUrl, false);
   
   // Use centralized IPFS service selection
   const ipfsService = getIPFSService();

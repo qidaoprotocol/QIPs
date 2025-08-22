@@ -4,8 +4,29 @@ import {
   PinataProvider, 
   LocalIPFSProvider, 
   MaiAPIProvider,
-  type IPFSProvider 
+  type IPFSProvider,
+  IPFS_GATEWAYS
 } from './ipfsService';
+
+/**
+ * Get configured IPFS gateways from environment or use defaults
+ */
+function getConfiguredGateways(): string[] {
+  // Check for multiple gateways configuration
+  if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_IPFS_GATEWAYS) {
+    const gateways = import.meta.env.VITE_IPFS_GATEWAYS;
+    if (typeof gateways === 'string') {
+      return gateways.split(',').map(url => url.trim()).filter(Boolean);
+    }
+  }
+  
+  // Check for single gateway and add to defaults
+  if (config.pinataGateway && !IPFS_GATEWAYS.includes(config.pinataGateway)) {
+    return [config.pinataGateway, ...IPFS_GATEWAYS];
+  }
+  
+  return IPFS_GATEWAYS;
+}
 
 /**
  * Get the appropriate IPFS provider based on environment configuration
@@ -23,8 +44,12 @@ export function getIPFSProvider(): IPFSProvider {
     useLocalIPFS: config.useLocalIPFS,
   });
   
+  // Get configured gateways
+  const gateways = getConfiguredGateways();
+  
   if (config.useMaiApi && config.ipfsApiUrl) {
     console.log('🌐 Using Mai API for IPFS uploads:', config.ipfsApiUrl);
+    console.log(`📡 Using ${gateways.length} IPFS gateways for load balancing`);
     return new MaiAPIProvider(config.ipfsApiUrl);
   }
   
@@ -39,6 +64,7 @@ export function getIPFSProvider(): IPFSProvider {
   // Fallback: If Mai API URL is configured, use it even without explicit flag
   if (config.ipfsApiUrl) {
     console.log('🌐 Using Mai API for IPFS uploads (fallback):', config.ipfsApiUrl);
+    console.log(`📡 Using ${gateways.length} IPFS gateways for load balancing`);
     return new MaiAPIProvider(config.ipfsApiUrl);
   }
   
