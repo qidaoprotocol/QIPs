@@ -3,6 +3,7 @@ import { useWalletClient } from 'wagmi';
 import { QIPClient, type QIPContent, QIPStatus } from '../services/qipClient';
 import { IPFSService } from '../services/ipfsService';
 import { getIPFSService } from '../services/getIPFSService';
+import { config } from '../config/env';
 
 interface UpdateQIPParams {
   qipNumber: bigint;
@@ -45,56 +46,68 @@ export function useUpdateQIP({
 
 
       try {
-        // Get current QIP data to preserve metadata
-        const currentQIP = await qipClient.getQIP(qipNumber);
-        
-        // Generate frontmatter with updated fields
-        const frontmatter = {
-          qip: qipNumber.toString(),
-          title: content.title,
-          network: content.network,
-          status: newStatus ? qipClient.getStatusString(newStatus) : qipClient.getStatusString(currentQIP.status),
-          author: content.author,
-          implementor: content.implementor || currentQIP.implementor,
-          'implementation-date': currentQIP.implementationDate > 0n 
-            ? new Date(Number(currentQIP.implementationDate) * 1000).toISOString().split('T')[0]
-            : 'None',
-          proposal: currentQIP.snapshotProposalId || 'None',
-          created: new Date(Number(currentQIP.createdAt) * 1000).toISOString().split('T')[0],
+        // Ensure content has qip number set
+        const qipContent: QIPContent = {
+          ...content,
+          qip: Number(qipNumber)
         };
 
-        // Generate markdown content
-        const markdownContent = ipfsService.generateQIPMarkdown(frontmatter, content.content);
+        // Format the full content for IPFS
+        const fullContent = ipfsService.formatQIPContent(qipContent);
+        
+        // Step 1: Pre-calculate IPFS CID without uploading
+        console.log('🔮 Calculating IPFS CID...');
+        const expectedCID = await ipfsService.calculateCID(fullContent);
+        const expectedIpfsUrl = `ipfs://${expectedCID}`;
+        console.log('✅ Expected CID:', expectedCID);
+        
+        // Step 2: Calculate content hash for blockchain
+        const contentHash = ipfsService.calculateContentHash(qipContent);
 
-        // Upload to IPFS
-        console.log('Uploading updated QIP content to IPFS...');
-        const ipfsUrl = await ipfsService.uploadQIP(markdownContent, {
-          name: `QIP-${qipNumber}.md`,
+        // Step 3: Update QIP on blockchain with pre-calculated IPFS URL
+        console.log('📝 Updating QIP on blockchain...');
+        const txHash = await qipClient.updateQIP(
+          walletClient,
+          qipNumber,
+          content.title,
+          contentHash,
+          expectedIpfsUrl,
+          'Updated via web interface'
+        );
+        console.log('✅ Blockchain update successful:', txHash);
+        
+        // Step 4: Upload to IPFS with proper metadata AFTER blockchain confirmation
+        console.log('📤 Uploading to IPFS with metadata...');
+        const actualCID = await ipfsService.provider.upload(fullContent, {
           qipNumber: qipNumber.toString(),
-          title: content.title,
-          author: content.author,
-          version: (Number(currentQIP.version) + 1).toString(),
+          groupId: config.pinataGroupId
         });
-
-        console.log('IPFS upload successful:', ipfsUrl);
-
-        // Update QIP on blockchain
-        console.log('Updating QIP on blockchain...');
-        const result = await qipClient.updateQIPFromContent(walletClient, qipNumber, content, ipfsUrl);
-
-        // Update status if provided
-        if (newStatus !== undefined && newStatus !== currentQIP.status) {
-          console.log('Updating QIP status...');
-          await qipClient.updateQIPStatus(walletClient, qipNumber, newStatus);
+        
+        // Verify CIDs match
+        if (actualCID !== expectedCID) {
+          console.warn('⚠️ CID mismatch! Expected:', expectedCID, 'Actual:', actualCID);
+        } else {
+          console.log('✅ IPFS upload successful, CID matches:', actualCID);
         }
 
-        console.log('QIP updated successfully:', result);
+        // Update status if provided
+        if (newStatus !== undefined) {
+          // Get current QIP to check status
+          const currentQIP = await qipClient.getQIP(qipNumber);
+          if (newStatus !== currentQIP.status) {
+            console.log('Updating QIP status...');
+            await qipClient.updateQIPStatus(walletClient, qipNumber, newStatus);
+          }
+        }
+
+        // Get updated QIP data for version
+        const updatedQIP = await qipClient.getQIP(qipNumber);
 
         return {
           qipNumber,
-          ipfsUrl,
-          version: result.version,
-          transactionHash: result.transactionHash,
+          ipfsUrl: expectedIpfsUrl,
+          version: updatedQIP.version,
+          transactionHash: txHash,
         };
       } catch (error) {
         console.error('Error updating QIP:', error);

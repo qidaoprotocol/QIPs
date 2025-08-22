@@ -1,12 +1,22 @@
 import type { Hash } from 'viem';
 import { keccak256, toBytes } from 'viem';
 import type { QIPContent } from './qipClient';
+// @ts-ignore - no types for ipfs-only-hash
+import * as IPFSOnlyHash from 'ipfs-only-hash';
+
+/**
+ * Metadata for IPFS uploads
+ */
+export interface UploadMetadata {
+  qipNumber?: number | string;
+  groupId?: string;
+}
 
 /**
  * Interface for IPFS storage providers
  */
 export interface IPFSProvider {
-  upload(content: string | Blob): Promise<string>;
+  upload(content: string | Blob, metadata?: UploadMetadata): Promise<string>;
   fetch(cid: string): Promise<string>;
 }
 
@@ -15,20 +25,20 @@ export interface IPFSProvider {
  */
 export class Web3StorageProvider implements IPFSProvider {
   private token: string;
-  
+
   constructor(token: string) {
     this.token = token;
   }
 
-  async upload(content: string | Blob): Promise<string> {
+  async upload(content: string | Blob, metadata?: UploadMetadata): Promise<string> {
     const blob = content instanceof Blob ? content : new Blob([content]);
-    
-    const response = await fetch('https://api.web3.storage/upload', {
-      method: 'POST',
+
+    const response = await fetch("https://api.web3.storage/upload", {
+      method: "POST",
       headers: {
-        'Authorization': `Bearer ${this.token}`,
+        Authorization: `Bearer ${this.token}`,
       },
-      body: blob
+      body: blob,
     });
 
     if (!response.ok) {
@@ -54,20 +64,21 @@ export class Web3StorageProvider implements IPFSProvider {
  */
 export class LocalIPFSProvider implements IPFSProvider {
   private apiUrl: string;
-  
-  constructor(apiUrl: string = 'http://localhost:5001', _gatewayUrl?: string) {
+
+  constructor(apiUrl: string = "http://localhost:5001", _gatewayUrl?: string) {
     this.apiUrl = apiUrl;
     // gatewayUrl is not used anymore as we fetch via API
   }
 
-  async upload(content: string | Blob): Promise<string> {
+  async upload(content: string | Blob, metadata?: UploadMetadata): Promise<string> {
     const formData = new FormData();
-    const blob = content instanceof Blob ? content : new Blob([content], { type: 'text/plain' });
-    formData.append('file', blob);
-    
-    const response = await fetch(`${this.apiUrl}/api/v0/add`, {
-      method: 'POST',
-      body: formData
+    const blob = content instanceof Blob ? content : new Blob([content], { type: "text/plain" });
+    formData.append("file", blob);
+
+    // Request CIDv1 from local IPFS daemon
+    const response = await fetch(`${this.apiUrl}/api/v0/add?cid-version=1`, {
+      method: "POST",
+      body: formData,
     });
 
     if (!response.ok) {
@@ -81,7 +92,7 @@ export class LocalIPFSProvider implements IPFSProvider {
   async fetch(cid: string): Promise<string> {
     // Use the API endpoint for fetching content in local development
     const response = await fetch(`${this.apiUrl}/api/v0/cat?arg=${cid}`, {
-      method: 'POST'
+      method: "POST",
     });
     if (!response.ok) {
       throw new Error(`Local IPFS fetch failed: ${response.statusText}. Ensure IPFS daemon is running at ${this.apiUrl}`);
@@ -96,51 +107,52 @@ export class LocalIPFSProvider implements IPFSProvider {
 export class PinataProvider implements IPFSProvider {
   private jwt: string;
   private gateway: string;
-  
-  constructor(jwt: string, gateway: string = 'https://gateway.pinata.cloud') {
+
+  constructor(jwt: string, gateway: string = "https://gateway.pinata.cloud") {
     this.jwt = jwt;
     this.gateway = gateway;
   }
 
-  async upload(content: string | Blob): Promise<string> {
+  async upload(content: string | Blob, metadata?: UploadMetadata): Promise<string> {
     // If content is a string, try to parse it as JSON for more efficient upload
-    if (typeof content === 'string') {
+    if (typeof content === "string") {
       try {
         const jsonData = JSON.parse(content);
-        return await this.uploadJSON(jsonData);
+        return await this.uploadJSON(jsonData, metadata);
       } catch {
         // Not valid JSON, upload as file
-        return await this.uploadFile(content);
+        return await this.uploadFile(content, metadata);
       }
     }
-    
+
     // Blob content, upload as file
     return await this.uploadFile(content);
   }
 
-  private async uploadJSON(data: any): Promise<string> {
+  private async uploadJSON(data: any, metadata?: UploadMetadata): Promise<string> {
     const body = {
       pinataContent: data,
       pinataOptions: {
-        cidVersion: 1
+        cidVersion: 1,  // Use CIDv1 (modern IPFS standard)
+        ...(metadata?.groupId && { groupId: metadata.groupId }),
       },
       pinataMetadata: {
-        name: `QIP-${data.qip || 'draft'}.json`,
+        name: `QIP-${metadata?.qipNumber || data.qip || "draft"}.json`,
         keyvalues: {
-          type: 'qip-proposal',
-          qip: String(data.qip || 'draft'),
-          network: data.network || 'unknown'
-        }
-      }
+          type: "qip-proposal",
+          qip: String(metadata?.qipNumber || data.qip || "draft"),
+          network: data.network || "unknown",
+        },
+      },
     };
 
-    const response = await fetch('https://api.pinata.cloud/pinning/pinJSONToIPFS', {
-      method: 'POST',
+    const response = await fetch("https://api.pinata.cloud/pinning/pinJSONToIPFS", {
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.jwt}`,
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.jwt}`,
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
     });
 
     if (!response.ok) {
@@ -152,29 +164,36 @@ export class PinataProvider implements IPFSProvider {
     return IpfsHash;
   }
 
-  private async uploadFile(content: string | Blob): Promise<string> {
+  private async uploadFile(content: string | Blob, metadata?: UploadMetadata): Promise<string> {
     const formData = new FormData();
-    const blob = content instanceof Blob ? content : new Blob([content], { type: 'text/plain' });
-    
+    const blob = content instanceof Blob ? content : new Blob([content], { type: "text/plain" });
+
     // Generate a filename based on content
-    const filename = content instanceof Blob ? 'file.txt' : 'qip-content.md';
-    formData.append('file', blob, filename);
-    
+    const filename = content instanceof Blob ? "file.txt" : "qip-content.md";
+    formData.append("file", blob, filename);
+
     // Add pinata metadata
-    const metadata = JSON.stringify({
+    const pinataMetadataJson = JSON.stringify({
       name: filename,
       keyvalues: {
-        type: 'qip-content'
-      }
-    });
-    formData.append('pinataMetadata', metadata);
-    
-    const response = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.jwt}`,
+        type: "qip-content",
       },
-      body: formData
+    });
+    formData.append("pinataMetadata", pinataMetadataJson);
+    
+    // Add pinata options to explicitly use CIDv1 (bafkrei...)
+    const pinataOptionsJson = JSON.stringify({
+      cidVersion: 1,  // Use CIDv1 (modern IPFS standard)
+      ...(metadata?.groupId && { groupId: metadata.groupId }),
+    });
+    formData.append("pinataOptions", pinataOptionsJson);
+
+    const response = await fetch("https://api.pinata.cloud/pinning/pinFileToIPFS", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.jwt}`,
+      },
+      body: formData,
     });
 
     if (!response.ok) {
@@ -200,22 +219,22 @@ export class PinataProvider implements IPFSProvider {
  */
 export class MaiAPIProvider implements IPFSProvider {
   private apiUrl: string;
-  
-  constructor(apiUrl: string = 'http://localhost:3001/v2/ipfs-upload') {
+
+  constructor(apiUrl: string = "http://localhost:3001/v2/ipfs-upload") {
     this.apiUrl = apiUrl;
   }
 
-  async upload(content: string | Blob): Promise<string> {
+  async upload(content: string | Blob, metadata?: UploadMetadata): Promise<string> {
     // Convert Blob to string if needed
     let contentString: string;
     let isJson = false;
-    
+
     if (content instanceof Blob) {
       contentString = await content.text();
     } else {
       contentString = content;
     }
-    
+
     // Try to parse as JSON to determine the upload format
     let jsonData: any = null;
     try {
@@ -225,30 +244,31 @@ export class MaiAPIProvider implements IPFSProvider {
       // Not JSON, treat as plain text/markdown
       isJson = false;
     }
-    
+
     let requestBody: any;
-    
+
     if (isJson) {
       // For JSON data, use Pinata's JSON upload format
       // Check if it already has QIP structure
       const hasQIPStructure = jsonData.qip !== undefined || jsonData.title !== undefined;
-      
+
       if (hasQIPStructure) {
         // Upload with metadata
         requestBody = {
           pinataContent: jsonData,
           pinataMetadata: {
-            name: `QIP-${jsonData.qip || 'draft'}.json`,
+            name: `QIP-${metadata?.qipNumber || jsonData.qip || "draft"}.json`,
             keyvalues: {
-              type: 'qip-proposal',
-              qip: String(jsonData.qip || 'draft'),
-              network: jsonData.network || 'unknown',
-              author: jsonData.author || 'unknown'
-            }
+              type: "qip-proposal",
+              qip: String(metadata?.qipNumber || jsonData.qip || "draft"),
+              network: jsonData.network || "unknown",
+              author: jsonData.author || "unknown",
+            },
           },
           pinataOptions: {
-            cidVersion: 1
-          }
+            cidVersion: 1,  // Use CIDv1 (modern IPFS standard)
+            ...(metadata?.groupId && { groupId: metadata.groupId }),
+          },
         };
       } else {
         // Direct JSON upload
@@ -259,27 +279,29 @@ export class MaiAPIProvider implements IPFSProvider {
       requestBody = {
         pinataContent: {
           content: contentString,
-          type: 'markdown'
+          type: "markdown",
         },
         pinataMetadata: {
-          name: 'QIP-content.json',
+          name: `QIP-${metadata?.qipNumber || "content"}.json`,
           keyvalues: {
-            type: 'qip-content',
-            format: 'markdown'
-          }
+            type: "qip-content",
+            format: "markdown",
+            ...(metadata?.qipNumber && { qip: String(metadata.qipNumber) }),
+          },
         },
         pinataOptions: {
-          cidVersion: 1
-        }
+          cidVersion: 1,  // Use CIDv1 (modern IPFS standard)
+          ...(metadata?.groupId && { groupId: metadata.groupId }),
+        },
       };
     }
-    
+
     const response = await fetch(this.apiUrl, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
@@ -289,24 +311,24 @@ export class MaiAPIProvider implements IPFSProvider {
     }
 
     const result = await response.json();
-    
+
     // Check for Pinata-compatible response format
     if (result.IpfsHash) {
       return result.IpfsHash;
     }
-    
+
     // Fallback to old format
     if (result.ipfsHash) {
       return result.ipfsHash;
     }
-    
-    throw new Error('Invalid response from Mai API: missing IPFS hash');
+
+    throw new Error("Invalid response from Mai API: missing IPFS hash");
   }
 
   async fetch(cid: string): Promise<string> {
     // In development mode with mock hashes (they start with Qm307... which is our mock prefix)
-    if (cid.startsWith('Qm307')) {
-      console.log('Development mode: Mock IPFS hash detected, returning placeholder content');
+    if (cid.startsWith("Qm307")) {
+      console.log("Development mode: Mock IPFS hash detected, returning placeholder content");
       return `---
 qip: 999
 title: Mock Content
@@ -323,21 +345,21 @@ created: 2024-01-01
 
 This is placeholder content for development mode.`;
     }
-    
+
     // For fetching, we can use any public gateway or the one provided by mai-api
     const gatewayUrl = `https://gateway.pinata.cloud/ipfs/${cid}`;
     const response = await fetch(gatewayUrl);
-    
+
     if (!response.ok) {
       throw new Error(`Failed to fetch from IPFS: ${response.statusText}`);
     }
-    
+
     const text = await response.text();
-    
+
     // Try to parse as JSON and extract content if it's wrapped
     try {
       const json = JSON.parse(text);
-      if (json.content && typeof json.content === 'string') {
+      if (json.content && typeof json.content === "string") {
         return json.content;
       }
       // If it's structured QIP data, format it as markdown
@@ -351,21 +373,21 @@ This is placeholder content for development mode.`;
       return text;
     }
   }
-  
+
   private formatQIPFromJSON(data: any): string {
     const frontmatter = [
-      `qip: ${data.qip || 'unknown'}`,
-      `title: ${data.title || 'Untitled'}`,
-      `network: ${data.network || 'unknown'}`,
-      `status: ${data.status || 'Draft'}`,
-      `author: ${data.author || 'unknown'}`,
-      `implementor: ${data.implementor || 'None'}`,
-      `implementation-date: ${data['implementation-date'] || 'None'}`,
-      `proposal: ${data.proposal || 'None'}`,
-      `created: ${data.created || new Date().toISOString().split('T')[0]}`
-    ].join('\n');
-    
-    return `---\n${frontmatter}\n---\n\n${data.content || ''}`;
+      `qip: ${data.qip || "unknown"}`,
+      `title: ${data.title || "Untitled"}`,
+      `network: ${data.network || "unknown"}`,
+      `status: ${data.status || "Draft"}`,
+      `author: ${data.author || "unknown"}`,
+      `implementor: ${data.implementor || "None"}`,
+      `implementation-date: ${data["implementation-date"] || "None"}`,
+      `proposal: ${data.proposal || "None"}`,
+      `created: ${data.created || new Date().toISOString().split("T")[0]}`,
+    ].join("\n");
+
+    return `---\n${frontmatter}\n---\n\n${data.content || ""}`;
   }
 }
 
@@ -373,10 +395,70 @@ This is placeholder content for development mode.`;
  * Main IPFS service for managing QIPs
  */
 export class IPFSService {
-  private provider: IPFSProvider;
+  public readonly provider: IPFSProvider;
 
   constructor(provider: IPFSProvider) {
     this.provider = provider;
+  }
+
+  /**
+   * Calculate IPFS CID without uploading
+   * @param content The content to hash
+   * @returns The CID that would be generated if uploaded
+   */
+  async calculateCID(content: string): Promise<string> {
+    try {
+      // Check which provider is being used to determine content format
+      let contentToHash: string;
+      
+      // If using MaiAPIProvider and content is markdown (not JSON)
+      if (this.provider instanceof MaiAPIProvider) {
+        try {
+          // Try to parse as JSON - if it succeeds, it's already JSON
+          JSON.parse(content);
+          contentToHash = content;
+        } catch {
+          // Not JSON, so it's markdown that will be wrapped
+          // MaiAPIProvider wraps markdown in this format for IPFS storage
+          const wrappedContent = {
+            content: content,
+            type: "markdown"
+          };
+          contentToHash = JSON.stringify(wrappedContent);
+        }
+      } else {
+        // For other providers, use content as-is
+        contentToHash = content;
+      }
+      
+      // Use ipfs-only-hash to calculate the CID
+      // IMPORTANT: Use CIDv1 with raw codec to match Pinata's behavior
+      // Pinata uses raw codec for JSON uploads, which produces bafkrei... CIDs
+      const cid = await IPFSOnlyHash.of(contentToHash, { 
+        cidVersion: 1,
+        rawLeaves: true,
+        codec: 'raw'
+      });
+      return cid;
+    } catch (error) {
+      console.error("Error calculating CID:", error);
+      throw new Error("Failed to calculate IPFS CID");
+    }
+  }
+
+  /**
+   * Calculate content hash for blockchain storage
+   * Uses keccak256 hash of the QIP content
+   */
+  calculateContentHash(qipContent: QIPContent): Hash {
+    // Calculate content hash including title, author, timestamp, and content to ensure uniqueness
+    const uniqueContent = JSON.stringify({
+      title: qipContent.title,
+      author: qipContent.author,
+      timestamp: Date.now(),
+      content: qipContent.content,
+    });
+    return keccak256(toBytes(uniqueContent));
   }
 
   /**
@@ -389,32 +471,32 @@ export class IPFSService {
   }> {
     // Format as markdown with YAML frontmatter
     const fullContent = this.formatQIPContent(qipContent);
-    
+
     // Calculate content hash including title, author, timestamp, and content to ensure uniqueness
     const uniqueContent = JSON.stringify({
       title: qipContent.title,
       author: qipContent.author,
       content: qipContent.content,
       created: qipContent.created,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     });
     const contentHash = keccak256(toBytes(uniqueContent));
-    
+
     // Upload to IPFS
     const cid = await this.provider.upload(fullContent);
     const ipfsUrl = `ipfs://${cid}`;
-    
+
     return {
       cid,
       ipfsUrl,
-      contentHash
+      contentHash,
     };
   }
 
   /**
    * Format QIP content with YAML frontmatter
    */
-  private formatQIPContent(qipData: QIPContent): string {
+  public formatQIPContent(qipData: QIPContent): string {
     return `---
 qip: ${qipData.qip}
 title: ${qipData.title}
@@ -422,7 +504,7 @@ network: ${qipData.network}
 status: ${qipData.status}
 author: ${qipData.author}
 implementor: ${qipData.implementor}
-implementation-date: ${qipData['implementation-date']}
+implementation-date: ${qipData["implementation-date"]}
 proposal: ${qipData.proposal}
 created: ${qipData.created}
 ---
@@ -440,15 +522,15 @@ ${qipData.content}`;
   }> {
     // Calculate content hash
     const contentHash = keccak256(toBytes(content));
-    
+
     // Upload to IPFS
     const cid = await this.provider.upload(content);
     const ipfsUrl = `ipfs://${cid}`;
-    
+
     return {
       cid,
       ipfsUrl,
-      contentHash
+      contentHash,
     };
   }
 
@@ -457,22 +539,20 @@ ${qipData.content}`;
    */
   async fetchQIP(cidOrUrl: string): Promise<string> {
     // Extract CID from URL if needed
-    const cid = cidOrUrl.startsWith('ipfs://') 
-      ? cidOrUrl.slice(7) 
-      : cidOrUrl;
-    
+    const cid = cidOrUrl.startsWith("ipfs://") ? cidOrUrl.slice(7) : cidOrUrl;
+
     const rawContent = await this.provider.fetch(cid);
-    
+
     // Check if content is JSON-wrapped (happens with some IPFS providers)
     try {
       const parsed = JSON.parse(rawContent);
-      
+
       // If it's an object with a 'content' field, unwrap it
-      if (typeof parsed === 'object' && parsed !== null && 'content' in parsed) {
+      if (typeof parsed === "object" && parsed !== null && "content" in parsed) {
         console.debug(`Unwrapping JSON-wrapped content for CID: ${cid}`);
         return parsed.content;
       }
-      
+
       // If it's some other JSON structure, return as-is
       return rawContent;
     } catch {
@@ -484,14 +564,18 @@ ${qipData.content}`;
   /**
    * Upload pre-formatted QIP markdown content with metadata
    */
-  async uploadQIP(markdownContent: string, metadata?: {
-    name?: string;
-    qipNumber?: string;
-    title?: string;
-    author?: string;
-    version?: string;
-  }): Promise<string> {
+  async uploadQIP(
+    markdownContent: string,
+    _metadata?: {
+      name?: string;
+      qipNumber?: string;
+      title?: string;
+      author?: string;
+      version?: string;
+    }
+  ): Promise<string> {
     // Upload to IPFS
+    // Note: metadata is currently unused but kept for future enhancements
     const cid = await this.provider.upload(markdownContent);
     return `ipfs://${cid}`;
   }
@@ -502,8 +586,8 @@ ${qipData.content}`;
   generateQIPMarkdown(frontmatter: Record<string, any>, content: string): string {
     const frontmatterLines = Object.entries(frontmatter)
       .map(([key, value]) => `${key}: ${value}`)
-      .join('\n');
-    
+      .join("\n");
+
     return `---\n${frontmatterLines}\n---\n\n${content}`;
   }
 
@@ -515,44 +599,44 @@ ${qipData.content}`;
     content: string;
   } {
     // Ensure we have a string to work with
-    if (typeof markdown !== 'string') {
-      console.error('parseQIPMarkdown received non-string:', typeof markdown, markdown);
-      throw new Error('Invalid QIP format: expected string content');
+    if (typeof markdown !== "string") {
+      console.error("parseQIPMarkdown received non-string:", typeof markdown, markdown);
+      throw new Error("Invalid QIP format: expected string content");
     }
-    
+
     // Trim whitespace
     markdown = markdown.trim();
-    
+
     if (!markdown) {
-      throw new Error('Invalid QIP format: empty content');
+      throw new Error("Invalid QIP format: empty content");
     }
-    
+
     // Check for frontmatter
     const match = markdown.match(/^---\n([\s\S]+?)\n---\n([\s\S]*)$/);
-    
+
     if (!match) {
       // Log the first 200 chars for debugging
-      console.error('Failed to parse QIP markdown. First 200 chars:', markdown.substring(0, 200));
+      console.error("Failed to parse QIP markdown. First 200 chars:", markdown.substring(0, 200));
       throw new Error('Invalid QIP format: missing frontmatter. Content must start with "---" delimiter');
     }
-    
+
     const yamlContent = match[1];
     const content = match[2].trim();
-    
+
     // Simple YAML parsing
     const frontmatter: Record<string, any> = {};
-    const lines = yamlContent.split('\n');
-    
+    const lines = yamlContent.split("\n");
+
     for (const line of lines) {
-      const colonIndex = line.indexOf(':');
+      const colonIndex = line.indexOf(":");
       if (colonIndex > 0) {
         const key = line.slice(0, colonIndex).trim();
         const value = line.slice(colonIndex + 1).trim();
         // Restore the None -> null conversion
-        frontmatter[key] = value === 'None' ? null : value;
+        frontmatter[key] = value === "None" ? null : value;
       }
     }
-    
+
     return { frontmatter, content };
   }
 
@@ -568,10 +652,8 @@ ${qipData.content}`;
    * Get gateway URL for a CID
    */
   getGatewayUrl(cidOrUrl: string): string {
-    const cid = cidOrUrl.startsWith('ipfs://') 
-      ? cidOrUrl.slice(7) 
-      : cidOrUrl;
-    
+    const cid = cidOrUrl.startsWith("ipfs://") ? cidOrUrl.slice(7) : cidOrUrl;
+
     if (this.provider instanceof Web3StorageProvider) {
       return `https://w3s.link/ipfs/${cid}`;
     } else if (this.provider instanceof PinataProvider) {
@@ -579,7 +661,7 @@ ${qipData.content}`;
     } else if (this.provider instanceof LocalIPFSProvider) {
       return `http://localhost:8080/ipfs/${cid}`;
     }
-    
+
     // Default gateway
     return `https://ipfs.io/ipfs/${cid}`;
   }

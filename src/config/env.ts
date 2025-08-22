@@ -45,6 +45,7 @@ export const config = {
   // IPFS Configuration
   useLocalIPFS: getBoolEnvVar("VITE_USE_LOCAL_IPFS", false),
   pinataGateway: getEnvVar("VITE_PINATA_GATEWAY", "https://gateway.pinata.cloud"),
+  pinataGroupId: getEnvVar("VITE_PINATA_GROUP_ID", ""),
   localIPFSApi: getEnvVar("VITE_LOCAL_IPFS_API", "http://localhost:5001"),
   localIPFSGateway: getEnvVar("VITE_LOCAL_IPFS_GATEWAY", "http://localhost:8080"),
   ipfsApiUrl: getEnvVar("VITE_IPFS_API_URL", ""),

@@ -5,6 +5,7 @@ import { type Address } from 'viem';
 import { QIPClient, QIPStatus, type QIPContent } from '../services/qipClient';
 import { getIPFSService } from '../services/getIPFSService';
 import { IPFSService } from '../services/ipfsService';
+import { config } from '../config/env';
 
 interface ProposalEditorProps {
   registryAddress: Address;
@@ -139,51 +140,78 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
           content,
         };
 
-        // Upload to IPFS
-        console.log("📤 Uploading to IPFS...");
-        const { cid, ipfsUrl, contentHash } = await ipfsService.uploadQIPFromContent(qipContent);
-        console.log("✅ IPFS upload successful:", { cid, ipfsUrl });
+        // Format the full content for IPFS
+        const fullContent = ipfsService.formatQIPContent(qipContent);
+        
+        // Step 1: Pre-calculate IPFS CID without uploading
+        console.log("🔮 Calculating IPFS CID...");
+        const expectedCID = await ipfsService.calculateCID(fullContent);
+        const expectedIpfsUrl = `ipfs://${expectedCID}`;
+        console.log("✅ Expected CID:", expectedCID);
+        
+        // Step 2: Calculate content hash for blockchain
+        const contentHash = ipfsService.calculateContentHash(qipContent);
 
+        let qipNumber: bigint;
+        let txHash: string;
+        
         if (existingQIP) {
           // Update existing QIP
-          const tx = await qipClient.updateQIP(
+          console.log("📝 Updating QIP on blockchain...");
+          txHash = await qipClient.updateQIP(
             walletClient,
             existingQIP.qipNumber,
             title,
             contentHash,
-            ipfsUrl,
+            expectedIpfsUrl,
             "Updated via web interface"
           );
-
-          setSuccess(`QIP-${existingQIP.qipNumber} updated successfully! Transaction: ${tx}`);
+          qipNumber = existingQIP.qipNumber;
+          console.log("✅ Blockchain update successful:", txHash);
         } else {
           // Create new QIP
           console.log("🚀 Creating new QIP on blockchain...");
-          const { hash, qipNumber } = await qipClient.createQIP(walletClient, title, network, contentHash, ipfsUrl);
-          console.log("✅ QIP created successfully:", { hash, qipNumber });
-
-          console.log("📝 Setting success state...");
-          if (qipNumber > 0) {
-            setSuccess(`QIP-${qipNumber} created successfully! Transaction: ${hash}`);
-          } else {
-            setSuccess(
-              `QIP submitted successfully! Transaction: ${hash}\n\nNote: The QIP number will be available once the transaction is confirmed.`
-            );
-          }
-          console.log("✅ Success state set");
-          // Invalidate list to refresh AllProposals
-          queryClient.invalidateQueries({ queryKey: ["qips"] });
-
-          // Reset form for new QIP
-          console.log("🔄 Resetting form...");
-          setTitle("");
-          setContent("");
-          setImplementor("None");
-          console.log("✅ Form reset complete");
-
-          // Force a re-render by updating saving state again
-          setSaving(false);
+          const result = await qipClient.createQIP(walletClient, title, network, contentHash, expectedIpfsUrl);
+          txHash = result.hash;
+          qipNumber = result.qipNumber;
+          console.log("✅ QIP created on blockchain:", { txHash, qipNumber });
         }
+        
+        // Step 3: Upload to IPFS with proper metadata AFTER blockchain confirmation
+        console.log("📤 Uploading to IPFS with metadata...");
+        const actualCID = await ipfsService.provider.upload(fullContent, {
+          qipNumber: qipNumber > 0 ? qipNumber.toString() : 'pending',
+          groupId: config.pinataGroupId
+        });
+        
+        // Verify CIDs match
+        if (actualCID !== expectedCID) {
+          console.warn("⚠️ CID mismatch! Expected:", expectedCID, "Actual:", actualCID);
+          // In production, you might want to handle this more gracefully
+        } else {
+          console.log("✅ IPFS upload successful, CID matches:", actualCID);
+        }
+        
+        // Set success message
+        if (existingQIP) {
+          setSuccess(`QIP-${qipNumber} updated successfully! Transaction: ${txHash}`);
+        } else if (qipNumber > 0) {
+          setSuccess(`QIP-${qipNumber} created successfully! Transaction: ${txHash}`);
+        } else {
+          setSuccess(
+            `QIP submitted successfully! Transaction: ${txHash}\n\nNote: The QIP number will be available once the transaction is confirmed.`
+          );
+        }
+        
+        // Invalidate list to refresh AllProposals
+        queryClient.invalidateQueries({ queryKey: ["qips"] });
+
+        // Reset form for new QIP
+        console.log("🔄 Resetting form...");
+        setTitle("");
+        setContent("");
+        setImplementor("None");
+        console.log("✅ Form reset complete");
       } catch (err: any) {
         console.error("❌ Error saving QIP:", err);
 

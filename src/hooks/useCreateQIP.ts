@@ -3,6 +3,7 @@ import { useWalletClient } from 'wagmi';
 import { QIPClient, type QIPContent } from '../services/qipClient';
 import { IPFSService } from '../services/ipfsService';
 import { getIPFSService } from '../services/getIPFSService';
+import { config } from '../config/env';
 
 interface CreateQIPParams {
   content: QIPContent;
@@ -42,43 +43,49 @@ export function useCreateQIP({
 
 
       try {
-        // Generate frontmatter
-        const frontmatter = {
-          qip: 'TBD', // Will be assigned by contract
-          title: content.title,
-          network: content.network,
-          status: 'Draft',
-          author: content.author,
-          implementor: content.implementor || 'None',
-          'implementation-date': 'None',
-          proposal: 'None',
-          created: new Date().toISOString().split('T')[0],
-        };
+        // Format the full content for IPFS
+        const fullContent = ipfsService.formatQIPContent(content);
+        
+        // Step 1: Pre-calculate IPFS CID without uploading
+        console.log('🔮 Calculating IPFS CID...');
+        const expectedCID = await ipfsService.calculateCID(fullContent);
+        const expectedIpfsUrl = `ipfs://${expectedCID}`;
+        console.log('✅ Expected CID:', expectedCID);
+        
+        // Step 2: Calculate content hash for blockchain
+        const contentHash = ipfsService.calculateContentHash(content);
 
-        // Generate markdown content
-        const markdownContent = ipfsService.generateQIPMarkdown(frontmatter, content.content);
-
-        // Upload to IPFS
-        console.log('Uploading QIP content to IPFS...');
-        const ipfsUrl = await ipfsService.uploadQIP(markdownContent, {
-          name: `QIP-${content.title.replace(/\s+/g, '-').toLowerCase()}.md`,
-          qipNumber: 'TBD',
-          title: content.title,
-          author: content.author,
+        // Step 3: Create QIP on blockchain with pre-calculated IPFS URL
+        console.log('🚀 Creating new QIP on blockchain...');
+        const result = await qipClient.createQIP(
+          walletClient,
+          content.title,
+          content.network,
+          contentHash,
+          expectedIpfsUrl
+        );
+        const txHash = result.hash;
+        const qipNumber = result.qipNumber;
+        console.log('✅ QIP created on blockchain:', { txHash, qipNumber });
+        
+        // Step 4: Upload to IPFS with proper metadata AFTER blockchain confirmation
+        console.log('📤 Uploading to IPFS with metadata...');
+        const actualCID = await ipfsService.provider.upload(fullContent, {
+          qipNumber: qipNumber > 0 ? qipNumber.toString() : 'pending',
+          groupId: config.pinataGroupId
         });
-
-        console.log('IPFS upload successful:', ipfsUrl);
-
-        // Create QIP on blockchain
-        console.log('Creating QIP on blockchain...');
-        const result = await qipClient.createQIPFromContent(walletClient, content, ipfsUrl);
-
-        console.log('QIP created successfully:', result);
+        
+        // Verify CIDs match
+        if (actualCID !== expectedCID) {
+          console.warn('⚠️ CID mismatch! Expected:', expectedCID, 'Actual:', actualCID);
+        } else {
+          console.log('✅ IPFS upload successful, CID matches:', actualCID);
+        }
 
         return {
-          qipNumber: result.qipNumber,
-          ipfsUrl,
-          transactionHash: result.transactionHash,
+          qipNumber: qipNumber,
+          ipfsUrl: expectedIpfsUrl,
+          transactionHash: txHash,
         };
       } catch (error) {
         console.error('Error creating QIP:', error);
