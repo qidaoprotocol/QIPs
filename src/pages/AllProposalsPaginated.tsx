@@ -121,16 +121,13 @@ const AllProposalsPaginated: React.FC = () => {
           {/* Stats bar */}
           {!isLoading && totalCount > 0 && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-              <div className="flex justify-between items-center">
+              <div className="flex justify-center items-center">
                 <div>
-                  <span className="text-sm text-gray-600">Showing </span>
+                  <span className="text-sm text-gray-600">Loaded </span>
                   <span className="font-semibold">{qips.length}</span>
                   <span className="text-sm text-gray-600"> of </span>
                   <span className="font-semibold">{totalCount}</span>
                   <span className="text-sm text-gray-600"> proposals</span>
-                </div>
-                <div className="text-sm text-gray-600">
-                  Page {currentPage} of {totalPages}
                 </div>
               </div>
             </div>

@@ -9,11 +9,15 @@ import { CACHE_TIMES } from '../config/queryClient';
 
 const statusColor:any = {
     Draft: '#757575',
-    'Review Pending': '#FFEB3B',
-    'Vote Pending': '#FFEB3B',
+    Review: '#FFEB3B',           // Changed from 'Review Pending'
+    'Review Pending': '#FFEB3B', // Keep for backward compatibility
+    Vote: '#FFEB3B',             // Changed from 'Vote Pending'
+    'Vote Pending': '#FFEB3B',   // Keep for backward compatibility
     Rejected: '#F44336',
     Approved: '#4CAF50',
     Implemented: '#4CAF50',
+    Superseded: '#9E9E9E',       // Added
+    Withdrawn: '#9E9E9E',        // Added
     Templates: '#757575',
 };
 
@@ -38,7 +42,7 @@ const ProposalListItem = (props: any) => {
             queryClient.prefetchQuery({
                 queryKey: cacheKey,
                 queryFn: async () => {
-                    const qipClient = new QIPClient(registryAddress, undefined, false);
+                    const qipClient = new QIPClient(registryAddress, config.baseRpcUrl, false);
                     const qip = await qipClient.getQIP(BigInt(qipNumber));
                     
                     if (!qip || qip.qipNumber === 0n) return null;
@@ -163,10 +167,9 @@ const ProposalListItem = (props: any) => {
                                                 </span> */}
 
                                                 <h3 className="inline pr-2">
-                                                    QIP{' '}
-                                                    {data.qip}
-                                                    :{' '}
-                                                    {data.title}
+                                                    {data.title?.startsWith(`QIP-${data.qip}`) || data.title?.startsWith(`QIP ${data.qip}`)
+                                                        ? data.title
+                                                        : `QIP-${data.qip}: ${data.title}`}
                                                 </h3>
                                             </div>
                                             <p className="line-clamp-2 break-words text-md font-semibold">

@@ -119,6 +119,12 @@ pkill -f anvil 2>/dev/null
 pkill -f vite 2>/dev/null
 sleep 2
 
+# Default to using local IPFS for local development unless explicitly disabled
+if [ -z "$USE_LOCAL_IPFS" ]; then
+    USE_LOCAL_IPFS="true"
+    echo -e "${BLUE}Defaulting to local IPFS for development${NC}"
+fi
+
 # Check if IPFS should be started
 if [ "$USE_LOCAL_IPFS" = "true" ]; then
     echo -e "${YELLOW}Checking IPFS (required for local development)...${NC}"
@@ -224,9 +230,16 @@ if [ "$USE_LOCAL_IPFS" = "true" ]; then
     echo -e "${GREEN}   API: http://localhost:5001${NC}"
     echo -e "${GREEN}   Gateway: http://localhost:8080${NC}"
     echo -e "${GREEN}   Test CID: $TEST_CID${NC}"
+    # Set flag that IPFS is available locally
+    LOCAL_IPFS_AVAILABLE=true
+    # Export VITE variables for local IPFS
+    export VITE_USE_LOCAL_IPFS=true
+    export VITE_LOCAL_IPFS_API="http://localhost:5001"
+    export VITE_LOCAL_IPFS_GATEWAY="http://localhost:8080"
 else
     echo -e "${YELLOW}📡 Using external IPFS provider (Mai API or Pinata)${NC}"
     echo "Local IPFS daemon will not be started"
+    LOCAL_IPFS_AVAILABLE=false
 fi
 
 # Load environment variables
@@ -298,40 +311,90 @@ if [ -n "$IMPERSONATE_ADDRESS" ]; then
 else
     # For local Anvil, use the first test account's private key
     # This is the well-known Anvil test private key (account 0)
-    DEPLOY_OUTPUT=$(PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
-        forge script script/DeployWithStandardCreate2.s.sol:DeployWithStandardCreate2 \
+    echo -e "${YELLOW}Running deployment script...${NC}"
+    DEPLOY_OUTPUT=$(forge script script/DeployWithStandardCreate2.s.sol:DeployWithStandardCreate2 \
         --rpc-url http://localhost:8545 \
-        --broadcast -vvv 2>&1)
+        --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+        --broadcast \
+        --sender 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 \
+        -vvv 2>&1)
 fi
 
-# Extract expected and actual addresses from the deploy output
-EXPECTED_ADDRESS=$(echo "$DEPLOY_OUTPUT" | grep "Expected QIPRegistry address:" | awk '{print $4}')
-REGISTRY_ADDRESS=$(echo "$DEPLOY_OUTPUT" | grep "QIPRegistry deployed at:" | awk '{print $4}')
+# Save deployment output for debugging
+echo "$DEPLOY_OUTPUT" > /tmp/deploy_output.log
 
-# If not deployed in this run, check if already deployed line is present
-if [ -z "$REGISTRY_ADDRESS" ]; then
+# Show key parts of the deployment output
+if echo "$DEPLOY_OUTPUT" | grep -q "Error\|error\|failed\|Failed"; then
+    echo -e "${RED}❌ Deployment may have failed. Checking output...${NC}"
+    echo "$DEPLOY_OUTPUT" | grep -E "Error|error|failed|Failed" | head -5
+fi
+
+# Extract the actual deployed address from the output
+REGISTRY_ADDRESS=""
+
+echo -e "${YELLOW}Looking for deployed contract address...${NC}"
+
+# Debug: Show what patterns we're finding
+echo "$DEPLOY_OUTPUT" | grep -i "deployed\|registry\|address" | head -5
+
+# Try multiple patterns to extract the deployed address
+if echo "$DEPLOY_OUTPUT" | grep -q "QIPRegistry deployed at:"; then
+    REGISTRY_ADDRESS=$(echo "$DEPLOY_OUTPUT" | grep "QIPRegistry deployed at:" | awk '{print $4}')
+    echo -e "${BLUE}Found: QIPRegistry deployed at: $REGISTRY_ADDRESS${NC}"
+elif echo "$DEPLOY_OUTPUT" | grep -q "QIPRegistry already deployed at:"; then
     REGISTRY_ADDRESS=$(echo "$DEPLOY_OUTPUT" | grep "QIPRegistry already deployed at:" | awk '{print $5}')
+    echo -e "${BLUE}Found: QIPRegistry already deployed at: $REGISTRY_ADDRESS${NC}"
+elif echo "$DEPLOY_OUTPUT" | grep -q "Registry deployed at:"; then
+    REGISTRY_ADDRESS=$(echo "$DEPLOY_OUTPUT" | grep "Registry deployed at:" | awk '{print $4}')
+    echo -e "${BLUE}Found: Registry deployed at: $REGISTRY_ADDRESS${NC}"
 fi
 
-# As a final fallback, use the expected computed address
-if [ -z "$REGISTRY_ADDRESS" ] && [ -n "$EXPECTED_ADDRESS" ]; then
-    REGISTRY_ADDRESS="$EXPECTED_ADDRESS"
-    echo -e "${YELLOW}Using computed expected registry address: $REGISTRY_ADDRESS${NC}"
+# If we still don't have an address, check if deployment actually happened
+if [ -z "$REGISTRY_ADDRESS" ]; then
+    echo -e "${YELLOW}No deployment message found. Checking for transaction receipts...${NC}"
+    
+    # Look for contract creation in broadcast logs
+    if echo "$DEPLOY_OUTPUT" | grep -q "Contract Address:"; then
+        REGISTRY_ADDRESS=$(echo "$DEPLOY_OUTPUT" | grep "Contract Address:" | head -1 | awk '{print $3}')
+        echo -e "${BLUE}Found in transaction: Contract Address: $REGISTRY_ADDRESS${NC}"
+    elif echo "$DEPLOY_OUTPUT" | grep -q "Deployed to:"; then
+        REGISTRY_ADDRESS=$(echo "$DEPLOY_OUTPUT" | grep "Deployed to:" | head -1 | awk '{print $3}')
+        echo -e "${BLUE}Found: Deployed to: $REGISTRY_ADDRESS${NC}"
+    else
+        # Last resort: find any address in output
+        REGISTRY_ADDRESS=$(echo "$DEPLOY_OUTPUT" | grep -oE '0x[a-fA-F0-9]{40}' | tail -1)
+        if [ ! -z "$REGISTRY_ADDRESS" ]; then
+            echo -e "${YELLOW}Using last address found in output: $REGISTRY_ADDRESS${NC}"
+        fi
+    fi
 fi
 
-echo -e "${GREEN}✅ QIP Registry at: $REGISTRY_ADDRESS${NC}"
-
-# Verify the address matches the expected deterministic address
-if [ -n "$EXPECTED_ADDRESS" ] && [ "$REGISTRY_ADDRESS" != "$EXPECTED_ADDRESS" ]; then
-    echo -e "${RED}❌ Registry address mismatch!${NC}"
-    echo "Expected: $EXPECTED_ADDRESS"
-    echo "Got: $REGISTRY_ADDRESS"
+if [ -z "$REGISTRY_ADDRESS" ]; then
+    echo -e "${RED}❌ Could not extract registry address from deployment output${NC}"
+    echo -e "${YELLOW}Check /tmp/deploy_output.log for full deployment output${NC}"
     exit 1
 fi
 
+# Verify the contract exists at the extracted address
+CODE=$(cast code $REGISTRY_ADDRESS --rpc-url http://localhost:8545 2>/dev/null || echo "0x")
+if [ "$CODE" = "0x" ] || [ -z "$CODE" ]; then
+    echo -e "${RED}❌ No contract found at extracted address $REGISTRY_ADDRESS${NC}"
+    echo -e "${YELLOW}Deployment may have failed.${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}✅ QIP Registry deployed at: $REGISTRY_ADDRESS${NC}"
+
+# Export the address for other scripts
+export QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS
+export VITE_QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS
+export VITE_BASE_RPC_URL="http://localhost:8545"
+export GATSBY_QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS
+export GATSBY_BASE_RPC_URL="http://localhost:8545"
+
 # Run initial data setup
 echo -e "\n${GREEN}3. Setting up initial test data...${NC}"
-VITE_QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS forge script script/LocalQIPTest.s.sol:LocalQIPTest --rpc-url http://localhost:8545 --broadcast --slow > /tmp/setup.log 2>&1
+QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS forge script script/LocalQIPTest.s.sol:LocalQIPTest --rpc-url http://localhost:8545 --broadcast --slow > /tmp/setup.log 2>&1
 
 if grep -q "Error" /tmp/setup.log; then
     echo -e "${YELLOW}⚠️  Some test data setup had errors (this is normal)${NC}"
@@ -341,31 +404,106 @@ fi
 
 # Run migration if requested
 if [ "$MIGRATE_QIPS" = true ]; then
-    echo -e "\n${GREEN}3.5. Running QIP migration (209-248)...${NC}"
-    echo -e "${YELLOW}This will migrate existing QIP files with their original numbers${NC}"
+    echo -e "\n${GREEN}3.5. Running Batch QIP Migration (209-248)...${NC}"
+    echo -e "${YELLOW}Using optimized Foundry batch migration for better performance${NC}"
     
-    # Export required environment variables for the migration script
+    # Export required environment variables
+    export QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS
     export VITE_QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS
     export VITE_BASE_RPC_URL="http://localhost:8545"
-    export VITE_LOCAL_IPFS_API="http://localhost:5001"
-    export VITE_LOCAL_IPFS_GATEWAY="http://localhost:8080"
+    export GATSBY_QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS
+    export BASE_RPC_URL="http://localhost:8545"
+    export GATSBY_BASE_RPC_URL="http://localhost:8545"
+    
+    # Configure IPFS based on what's available
+    # Use the flag we set earlier when checking/starting IPFS
+    if [ "$LOCAL_IPFS_AVAILABLE" = true ]; then
+        # Local IPFS is running, use it
+        export USE_LOCAL_IPFS=true
+        export VITE_USE_LOCAL_IPFS=true
+        export VITE_LOCAL_IPFS_API="http://localhost:5001"
+        export VITE_LOCAL_IPFS_GATEWAY="http://localhost:8080"
+        export GATSBY_LOCAL_IPFS_API="http://localhost:5001"
+        export GATSBY_LOCAL_IPFS_GATEWAY="http://localhost:8080"
+        echo -e "${YELLOW}Using local IPFS daemon for migration${NC}"
+    else
+        # No local IPFS, need to use Pinata
+        if [ -z "$PINATA_JWT" ]; then
+            echo -e "${RED}❌ PINATA_JWT not set. Required for remote IPFS uploads.${NC}"
+            echo "Please either:"
+            echo "  1. Set USE_LOCAL_IPFS=true in .env.local to start local IPFS"
+            echo "  2. Set PINATA_JWT in your .env.local file for Pinata uploads"
+            exit 1
+        fi
+        export USE_LOCAL_IPFS=false
+        echo -e "${YELLOW}Using Pinata for IPFS uploads${NC}"
+    fi
+    
     # Use the governance/deployer account private key (has editor permissions by default)
     export PRIVATE_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
     
-    # Run the migration script
-    bun run scripts/migrate-with-original-numbers-dev.ts
+    # Choose migration method based on preference
+    echo -e "${BLUE}Migration Options:${NC}"
+    echo "1. Foundry Script (Recommended - batch processing)"
+    echo "2. TypeScript Batch Script (parallel IPFS uploads)"
+    echo "3. Original TypeScript Script (sequential)"
+    
+    # Default to Foundry script for best performance
+    MIGRATION_METHOD=1
+    
+    case $MIGRATION_METHOD in
+        1)
+            echo -e "${YELLOW}Using Foundry batch migration script...${NC}"
+            # Run the Foundry migration script with FFI for file reading
+            forge script script/MigrateBatchWithFFI.s.sol \
+                --rpc-url http://localhost:8545 \
+                --broadcast \
+                --ffi \
+                -vvv
+            ;;
+        2)
+            echo -e "${YELLOW}Using TypeScript batch migration script...${NC}"
+            # Run the optimized TypeScript migration
+            bun run scripts/migrate-batch-optimized.ts
+            ;;
+        3)
+            echo -e "${YELLOW}Using original migration script...${NC}"
+            # Run the original migration script
+            bun run scripts/migrate-with-original-numbers-dev.ts
+            ;;
+    esac
     
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}✅ QIP migration complete${NC}"
+        
+        # Show migration summary
+        echo -e "\n${BLUE}📊 Migration Summary:${NC}"
+        cast call $REGISTRY_ADDRESS "nextQIPNumber()(uint256)" --rpc-url http://localhost:8545 | xargs -I {} echo "Next QIP Number: {}"
+        
+        # Try to get count of migrated QIPs
+        MIGRATED_COUNT=$(cast call $REGISTRY_ADDRESS "nextQIPNumber()(uint256)" --rpc-url http://localhost:8545 2>/dev/null || echo "0")
+        if [ "$MIGRATED_COUNT" -gt "208" ]; then
+            ACTUAL_MIGRATED=$((MIGRATED_COUNT - 208))
+            echo "QIPs migrated: ~$ACTUAL_MIGRATED"
+        fi
     else
         echo -e "${YELLOW}⚠️  QIP migration had some errors (check logs above)${NC}"
+        echo "You can retry migration by running:"
+        echo "  forge script script/MigrateBatchWithFFI.s.sol --rpc-url http://localhost:8545 --broadcast --ffi"
     fi
 fi
 
 # Start Vite in development mode
 echo -e "\n${GREEN}4. Starting Vite development server...${NC}"
-# Export registry address for Vite
+# Export registry address and RPC URL for Vite
 export VITE_QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS
+export VITE_BASE_RPC_URL="http://localhost:8545"
+# Export IPFS settings for Vite if local IPFS is available
+if [ "$LOCAL_IPFS_AVAILABLE" = true ]; then
+    export VITE_USE_LOCAL_IPFS=true
+    export VITE_LOCAL_IPFS_API="http://localhost:5001"
+    export VITE_LOCAL_IPFS_GATEWAY="http://localhost:8080"
+fi
 bun run dev &
 VITE_PID=$!
 echo "Vite PID: $VITE_PID"

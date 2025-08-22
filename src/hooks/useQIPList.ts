@@ -30,7 +30,7 @@ export function useQIPList({
 }: UseQIPListOptions) {
   // Memoize QIPClient to avoid recreating on every render
   const qipClient = React.useMemo(() => 
-    new QIPClient(registryAddress, undefined, false), // Let QIPClient use load balancing
+    new QIPClient(registryAddress, config.baseRpcUrl, false),
     [registryAddress]
   );
   

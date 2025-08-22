@@ -33,12 +33,13 @@ function getConfiguredGateways(): string[] {
  */
 export function getIPFSProvider(): IPFSProvider {
   // Priority order:
-  // 1. Mai API (if enabled and URL configured)
-  // 2. Local IPFS (if enabled)
+  // 1. Local IPFS (if in local mode OR explicitly enabled)
+  // 2. Mai API (if enabled and URL configured)
   // 3. Pinata (if JWT provided)
   // 4. Mai API fallback (if URL configured, even without explicit flag)
   
   console.log('🔍 IPFS Provider Selection Debug:', {
+    localMode: config.localMode,
     useMaiApi: config.useMaiApi,
     ipfsApiUrl: config.ipfsApiUrl,
     useLocalIPFS: config.useLocalIPFS,
@@ -47,18 +48,19 @@ export function getIPFSProvider(): IPFSProvider {
   // Get configured gateways
   const gateways = getConfiguredGateways();
   
-  if (config.useMaiApi && config.ipfsApiUrl) {
-    console.log('🌐 Using Mai API for IPFS uploads:', config.ipfsApiUrl);
-    console.log(`📡 Using ${gateways.length} IPFS gateways for load balancing`);
-    return new MaiAPIProvider(config.ipfsApiUrl);
-  }
-  
-  if (config.useLocalIPFS) {
-    console.log('🏠 Using local IPFS node');
+  // In local mode, always use local IPFS
+  if (config.localMode || config.useLocalIPFS) {
+    console.log('🏠 Using local IPFS node (localMode:', config.localMode, ', useLocalIPFS:', config.useLocalIPFS, ')');
     return new LocalIPFSProvider(
       config.localIPFSApi,
       config.localIPFSGateway
     );
+  }
+  
+  if (config.useMaiApi && config.ipfsApiUrl) {
+    console.log('🌐 Using Mai API for IPFS uploads:', config.ipfsApiUrl);
+    console.log(`📡 Using ${gateways.length} IPFS gateways for load balancing`);
+    return new MaiAPIProvider(config.ipfsApiUrl);
   }
   
   // Fallback: If Mai API URL is configured, use it even without explicit flag

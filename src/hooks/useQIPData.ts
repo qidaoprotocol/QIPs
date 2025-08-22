@@ -49,7 +49,7 @@ export function useQIPData(options: UseQIPDataOptions = {}) {
   // Initialize services (memoized to avoid recreating on every render)
   const qipClient = React.useMemo(() => 
     registryAddress 
-      ? new QIPClient(registryAddress, undefined, false) // Let QIPClient use load balancing
+      ? new QIPClient(registryAddress, config.baseRpcUrl, false)
       : null,
     [registryAddress]
   );

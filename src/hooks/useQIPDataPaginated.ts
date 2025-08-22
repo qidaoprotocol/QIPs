@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { QIPClient, QIPStatus } from '../services/qipClient';
 import { getIPFSService } from '../services/getIPFSService';
 import { QIPData } from './useQIPData';
+import { config } from '../config/env';
 
 interface UseQIPDataPaginatedOptions {
   registryAddress?: `0x${string}`;
@@ -113,7 +114,7 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
   // Initialize services (memoized to avoid recreating on every render)
   const qipClient = useMemo(() => 
     registryAddress 
-      ? new QIPClient(registryAddress, undefined, false)
+      ? new QIPClient(registryAddress, config.baseRpcUrl, false)
       : null,
     [registryAddress]
   );
@@ -214,11 +215,14 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
               ? new Date(Number(qip.implementationDate) * 1000).toISOString().split("T")[0] 
               : "None";
 
+            const statusString = qipClient.getStatusString(qip.status);
+            console.debug(`[useQIPDataPaginated] QIP ${qip.qipNumber} - Status: ${qip.status} -> ${statusString}`);
+            
             const qipData: QIPData = {
               qipNumber: Number(qip.qipNumber),
               title: qip.title,
               network: qip.network,
-              status: qipClient.getStatusString(qip.status),
+              status: statusString,
               author: frontmatter.author || qip.author,
               implementor: qip.implementor,
               implementationDate: implDate,
