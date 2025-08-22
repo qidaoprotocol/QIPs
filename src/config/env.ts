@@ -1,57 +1,58 @@
 /**
  * Centralized environment configuration
- * Supports both Vite and Gatsby environments during migration
+ * Uses Vite environment variables
  */
 
 // Helper to get env var with fallback
-const getEnvVar = (viteKey: string, gatsbyKey: string, defaultValue = ""): string => {
+const getEnvVar = (key: string, defaultValue = ""): string => {
   // Check for Vite environment variables - directly access import.meta.env
-  let viteValue: string | undefined;
+  let value: string | undefined;
   try {
     if (typeof import.meta !== "undefined" && (import.meta as any).env) {
-      viteValue = (import.meta as any).env[viteKey];
+      value = (import.meta as any).env[key];
     }
   } catch (e) {
     // Not in Vite environment
   }
 
-  // Check for process.env (Node/Gatsby environment)
-  const gatsbyValue = typeof process !== "undefined" && process.env?.[gatsbyKey];
+  // Fallback to process.env for build scripts
+  if (!value && typeof process !== "undefined" && process.env?.[key]) {
+    value = process.env[key];
+  }
 
-  const result = viteValue || gatsbyValue || defaultValue;
+  const result = value || defaultValue;
 
   // Debug critical IPFS config values
-  if (viteKey.includes("IPFS") || viteKey.includes("MAI")) {
-    console.debug(`Env var ${viteKey}: vite=${viteValue}, gatsby=${gatsbyValue}, result=${result}`);
+  if (key.includes("IPFS") || key.includes("MAI")) {
+    console.debug(`Env var ${key}: ${result}`);
   }
 
   return result;
 };
 
 // Helper to get boolean env var
-const getBoolEnvVar = (viteKey: string, gatsbyKey: string, defaultValue = false): boolean => {
-  const value = getEnvVar(viteKey, gatsbyKey, String(defaultValue));
+const getBoolEnvVar = (key: string, defaultValue = false): boolean => {
+  const value = getEnvVar(key, String(defaultValue));
   return value === "true";
 };
 
 export const config = {
   // Blockchain Configuration
-  qipRegistryAddress: getEnvVar("VITE_QIP_REGISTRY_ADDRESS", "GATSBY_QIP_REGISTRY_ADDRESS") as `0x${string}`,
-  baseRpcUrl: getEnvVar("VITE_BASE_RPC_URL", "GATSBY_BASE_RPC_URL", "http://localhost:8545"),
-  walletConnectProjectId: getEnvVar("VITE_WALLETCONNECT_PROJECT_ID", "GATSBY_WALLETCONNECT_PROJECT_ID"),
+  qipRegistryAddress: getEnvVar("VITE_QIP_REGISTRY_ADDRESS") as `0x${string}`,
+  baseRpcUrl: getEnvVar("VITE_BASE_RPC_URL", "http://localhost:8545"),
+  walletConnectProjectId: getEnvVar("VITE_WALLETCONNECT_PROJECT_ID"),
 
   // IPFS Configuration
-  useLocalIPFS: getBoolEnvVar("VITE_USE_LOCAL_IPFS", "GATSBY_USE_LOCAL_IPFS", false),
-  // @deprecated - Pinata uploads are now handled server-side via Mai API
-  pinataGateway: getEnvVar("VITE_PINATA_GATEWAY", "GATSBY_PINATA_GATEWAY", "https://gateway.pinata.cloud"),
-  localIPFSApi: getEnvVar("VITE_LOCAL_IPFS_API", "GATSBY_LOCAL_IPFS_API", "http://localhost:5001"),
-  localIPFSGateway: getEnvVar("VITE_LOCAL_IPFS_GATEWAY", "GATSBY_LOCAL_IPFS_GATEWAY", "http://localhost:8080"),
-  ipfsApiUrl: getEnvVar("VITE_IPFS_API_URL", "GATSBY_IPFS_API_URL", ""),
-  useMaiApi: getBoolEnvVar("VITE_USE_MAI_API", "GATSBY_USE_MAI_API", false),
+  useLocalIPFS: getBoolEnvVar("VITE_USE_LOCAL_IPFS", false),
+  pinataGateway: getEnvVar("VITE_PINATA_GATEWAY", "https://gateway.pinata.cloud"),
+  localIPFSApi: getEnvVar("VITE_LOCAL_IPFS_API", "http://localhost:5001"),
+  localIPFSGateway: getEnvVar("VITE_LOCAL_IPFS_GATEWAY", "http://localhost:8080"),
+  ipfsApiUrl: getEnvVar("VITE_IPFS_API_URL", ""),
+  useMaiApi: getBoolEnvVar("VITE_USE_MAI_API", false),
 
   // App Configuration
-  localMode: getBoolEnvVar("VITE_LOCAL_MODE", "GATSBY_LOCAL_MODE", false),
-  useTestnet: getBoolEnvVar("VITE_USE_TESTNET", "GATSBY_USE_TESTNET", false),
+  localMode: getBoolEnvVar("VITE_LOCAL_MODE", false),
+  useTestnet: getBoolEnvVar("VITE_USE_TESTNET", false),
 
   // Development Configuration
   isDevelopment: process.env.NODE_ENV === "development",

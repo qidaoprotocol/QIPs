@@ -12,9 +12,10 @@ evm_version = "shanghai"
 remappings_generate = true
 remappings_location = "txt"
 
-[etherscan]
-base = { key = "${BASESCAN_API_KEY}" }
-base-sepolia = { key = "${BASESCAN_API_KEY}" }
+# Etherscan API keys should be configured in ~/.foundry/foundry.toml
+# Example:
+# [etherscan]
+# base = { key = "YOUR_API_KEY" }
 
 [rpc_endpoints]
 base = "${BASE_RPC_URL}"

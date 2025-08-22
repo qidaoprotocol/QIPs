@@ -9,17 +9,33 @@ NC='\033[0m' # No Color
 
 # Parse command line arguments
 MIGRATE_QIPS=false
+IMPERSONATE_ADDRESS=""
+COMPUTE_ONLY=false
 for arg in "$@"; do
     case $arg in
         --migrate)
             MIGRATE_QIPS=true
             shift
             ;;
+        --impersonate=*)
+            IMPERSONATE_ADDRESS="${arg#*=}"
+            shift
+            ;;
+        --compute-only)
+            COMPUTE_ONLY=true
+            shift
+            ;;
         --help)
             echo "Usage: $0 [options]"
             echo "Options:"
-            echo "  --migrate    Run migration script to populate QIPs 209-248 from existing files"
-            echo "  --help       Show this help message"
+            echo "  --migrate                    Run migration script to populate QIPs 209-248 from existing files"
+            echo "  --impersonate=<address>      Deploy contracts as a specific address (gets deterministic address)"
+            echo "  --compute-only               Only compute the deployment address without starting services"
+            echo "  --help                       Show this help message"
+            echo ""
+            echo "Examples:"
+            echo "  $0 --impersonate=0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7"
+            echo "  $0 --impersonate=0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7 --compute-only"
             exit 0
             ;;
     esac
@@ -27,6 +43,33 @@ done
 
 echo -e "${BLUE}🚀 Starting QIPs Local Development Environment (Vite)${NC}"
 echo "================================================"
+
+# If compute-only mode, just compute the address and exit
+if [ "$COMPUTE_ONLY" = true ]; then
+    echo -e "${BLUE}📊 Computing Deployment Address${NC}"
+    
+    if [ -z "$IMPERSONATE_ADDRESS" ]; then
+        echo -e "${YELLOW}Computing addresses for common test accounts...${NC}"
+        forge script script/DeployWithImpersonation.s.sol:DeployWithImpersonation \
+            --sig "computeAddressesForMultiple()" \
+            --rpc-url http://localhost:8545 2>/dev/null || \
+        forge script script/DeployWithImpersonation.s.sol:DeployWithImpersonation \
+            --sig "computeAddressesForMultiple()"
+    else
+        echo -e "${YELLOW}Computing address for: $IMPERSONATE_ADDRESS${NC}"
+        IMPERSONATE_ADDRESS=$IMPERSONATE_ADDRESS forge script script/DeployWithImpersonation.s.sol:DeployWithImpersonation \
+            --sig "computeAddressOnly()" \
+            --rpc-url http://localhost:8545 2>/dev/null || \
+        IMPERSONATE_ADDRESS=$IMPERSONATE_ADDRESS forge script script/DeployWithImpersonation.s.sol:DeployWithImpersonation \
+            --sig "computeAddressOnly()"
+    fi
+    
+    echo ""
+    echo -e "${GREEN}✅ Address computation complete${NC}"
+    echo -e "${YELLOW}Note: These addresses assume deployment with the standard CREATE2 deployer${NC}"
+    echo -e "${YELLOW}      at 0x4e59b44847b379578588920cA78FbF26c0B4956C${NC}"
+    exit 0
+fi
 
 # Function to cleanup on exit
 cleanup() {
@@ -245,7 +288,21 @@ echo -e "${GREEN}✅ Anvil is running on http://localhost:8545${NC}"
 
 # Deploy contracts using deterministic CREATE2 deployment
 echo -e "\n${GREEN}2. Deploying QIP Registry contract (deterministic)...${NC}"
-DEPLOY_OUTPUT=$(forge script script/DeployWithStandardCreate2.s.sol:DeployWithStandardCreate2 --rpc-url http://localhost:8545 --broadcast -vvv 2>&1)
+
+if [ -n "$IMPERSONATE_ADDRESS" ]; then
+    echo -e "${YELLOW}Using impersonation for address: $IMPERSONATE_ADDRESS${NC}"
+    DEPLOY_OUTPUT=$(IMPERSONATE_ADDRESS=$IMPERSONATE_ADDRESS forge script script/DeployWithImpersonation.s.sol:DeployWithImpersonation \
+        --sig "runWithImpersonation()" \
+        --rpc-url http://localhost:8545 \
+        --broadcast -vvv 2>&1)
+else
+    # For local Anvil, use the first test account's private key
+    # This is the well-known Anvil test private key (account 0)
+    DEPLOY_OUTPUT=$(PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+        forge script script/DeployWithStandardCreate2.s.sol:DeployWithStandardCreate2 \
+        --rpc-url http://localhost:8545 \
+        --broadcast -vvv 2>&1)
+fi
 
 # Extract expected and actual addresses from the deploy output
 EXPECTED_ADDRESS=$(echo "$DEPLOY_OUTPUT" | grep "Expected QIPRegistry address:" | awk '{print $4}')
@@ -274,7 +331,7 @@ fi
 
 # Run initial data setup
 echo -e "\n${GREEN}3. Setting up initial test data...${NC}"
-QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS forge script script/LocalQIPTest.s.sol:LocalQIPTest --rpc-url http://localhost:8545 --broadcast --slow > /tmp/setup.log 2>&1
+VITE_QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS forge script script/LocalQIPTest.s.sol:LocalQIPTest --rpc-url http://localhost:8545 --broadcast --slow > /tmp/setup.log 2>&1
 
 if grep -q "Error" /tmp/setup.log; then
     echo -e "${YELLOW}⚠️  Some test data setup had errors (this is normal)${NC}"
@@ -288,11 +345,6 @@ if [ "$MIGRATE_QIPS" = true ]; then
     echo -e "${YELLOW}This will migrate existing QIP files with their original numbers${NC}"
     
     # Export required environment variables for the migration script
-    export GATSBY_QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS
-    export GATSBY_BASE_RPC_URL="http://localhost:8545"
-    export GATSBY_LOCAL_IPFS_API="http://localhost:5001"
-    export GATSBY_LOCAL_IPFS_GATEWAY="http://localhost:8080"
-    # Also export as VITE_ for compatibility
     export VITE_QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS
     export VITE_BASE_RPC_URL="http://localhost:8545"
     export VITE_LOCAL_IPFS_API="http://localhost:5001"
@@ -314,7 +366,6 @@ fi
 echo -e "\n${GREEN}4. Starting Vite development server...${NC}"
 # Export registry address for Vite
 export VITE_QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS
-export GATSBY_QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS
 bun run dev &
 VITE_PID=$!
 echo "Vite PID: $VITE_PID"
@@ -352,6 +403,9 @@ echo ""
 echo -e "${BLUE}📊 Contract Information:${NC}"
 echo "- QIP Registry: $REGISTRY_ADDRESS"
 echo "- Chain ID: 8453 (Base Fork)"
+if [ -n "$IMPERSONATE_ADDRESS" ]; then
+    echo "- Deployed as: $IMPERSONATE_ADDRESS (impersonated)"
+fi
 echo ""
 echo -e "${BLUE}🔑 Test Accounts:${NC}"
 echo "- Governance: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"

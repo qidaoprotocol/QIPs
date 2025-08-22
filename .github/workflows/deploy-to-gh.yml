@@ -49,6 +49,8 @@ jobs:
           VITE_USE_TESTNET: 'false'
           VITE_USE_LOCAL_IPFS: 'false'
           VITE_PINATA_GATEWAY: ${{ secrets.PINATA_GATEWAY }}
+          VITE_USE_MAI_API: 'true'
+          VITE_IPFS_API_URL: ${{ secrets.MAI_API_URL }}
         run: |
           bunx tsc --noEmit
           bun run build -- --base=/${{ github.event.repository.name }}/

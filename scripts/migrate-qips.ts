@@ -10,11 +10,11 @@ import { IPFSService, PinataProvider } from '../src/services/ipfsService';
 
 // Configuration
 const PRIVATE_KEY = process.env.PRIVATE_KEY as `0x${string}`;
-const QIP_REGISTRY_ADDRESS = process.env.QIP_REGISTRY_ADDRESS as Address;
+const QIP_REGISTRY_ADDRESS = (process.env.VITE_QIP_REGISTRY_ADDRESS || process.env.QIP_REGISTRY_ADDRESS) as Address;
 const PINATA_JWT = process.env.PINATA_JWT || '';
-const PINATA_GATEWAY = process.env.PINATA_GATEWAY || 'https://gateway.pinata.cloud';
-const USE_TESTNET = process.env.USE_TESTNET === 'true';
-const RPC_URL = process.env.BASE_RPC_URL;
+const PINATA_GATEWAY = process.env.VITE_PINATA_GATEWAY || process.env.PINATA_GATEWAY || 'https://gateway.pinata.cloud';
+const USE_TESTNET = process.env.VITE_USE_TESTNET === 'true' || process.env.USE_TESTNET === 'true';
+const RPC_URL = process.env.VITE_BASE_RPC_URL || process.env.BASE_RPC_URL;
 
 // Paths
 const QIP_DIR = join(process.cwd(), 'contents/QIP');

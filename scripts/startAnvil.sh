@@ -32,14 +32,12 @@ if [ ! -f .env ]; then
         sed -i.bak 's|PRIVATE_KEY=.*|PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80|' .env
         sed -i.bak 's|BASE_RPC_URL=.*|BASE_RPC_URL=http://localhost:8545|' .env
         sed -i.bak 's|GATSBY_BASE_RPC_URL=.*|GATSBY_BASE_RPC_URL=http://localhost:8545|' .env
-        sed -i.bak 's|BASESCAN_API_KEY=.*|BASESCAN_API_KEY=dummy_key_for_local_testing|' .env
         rm .env.bak
     else
         echo -e "${YELLOW}⚠️  .env file not found. Creating minimal .env...${NC}"
         cat > .env << EOF
 PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 BASE_RPC_URL=http://localhost:8545
-BASESCAN_API_KEY=dummy_key_for_local_testing
 EOF
     fi
 fi

@@ -1,0 +1,8 @@
+# Keep deployment records but ignore temporary files
+*.bak
+*.tmp
+.DS_Store
+
+# Keep the directory structure
+!.gitignore
+!README.md
