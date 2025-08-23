@@ -8,7 +8,8 @@
     ],
     "name": "createQIP",
     "outputs": [{ "name": "", "type": "uint256" }],
-    "type": "function"
+    "type": "function",
+    "stateMutability": "nonpayable"
   },
   {
     "inputs": [
@@ -20,7 +21,8 @@
     ],
     "name": "updateQIP",
     "outputs": [],
-    "type": "function"
+    "type": "function",
+    "stateMutability": "nonpayable"
   },
   {
     "inputs": [
@@ -29,7 +31,8 @@
     ],
     "name": "linkSnapshotProposal",
     "outputs": [],
-    "type": "function"
+    "type": "function",
+    "stateMutability": "nonpayable"
   },
   {
     "inputs": [
@@ -73,6 +76,23 @@
     "inputs": [{ "name": "_author", "type": "address" }],
     "name": "getQIPsByAuthor",
     "outputs": [{ "name": "", "type": "uint256[]" }],
+    "type": "function",
+    "stateMutability": "view"
+  },
+  {
+    "inputs": [],
+    "name": "EDITOR_ROLE",
+    "outputs": [{ "name": "", "type": "bytes32" }],
+    "type": "function",
+    "stateMutability": "view"
+  },
+  {
+    "inputs": [
+      { "name": "role", "type": "bytes32" },
+      { "name": "account", "type": "address" }
+    ],
+    "name": "hasRole",
+    "outputs": [{ "name": "", "type": "bool" }],
     "type": "function",
     "stateMutability": "view"
   },

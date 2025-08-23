@@ -54,6 +54,9 @@ export const config = {
   // App Configuration
   localMode: getBoolEnvVar("VITE_LOCAL_MODE", false),
   useTestnet: getBoolEnvVar("VITE_USE_TESTNET", false),
+  
+  // Snapshot Configuration
+  snapshotSpace: getEnvVar("VITE_SNAPSHOT_SPACE", "qidao.eth"),
 
   // Development Configuration
   isDevelopment: process.env.NODE_ENV === "development",

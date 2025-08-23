@@ -4,6 +4,7 @@ import { createProposal, getProposals } from "../utils/snapshotClient";
 import { Proposal } from "@snapshot-labs/snapshot.js/dist/src/sign/types";
 import { ethers } from "ethers";
 import { useQuery } from "@tanstack/react-query";
+import { config } from "../config";
 
 interface SnapshotSubmitterProps {
   frontmatter: any;
@@ -17,7 +18,7 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({ frontmatter, html
   const [status, setStatus] = useState<React.ReactNode>(null);
   const [highestQip, setHighestQip] = useState<number | null>(null);
 
-  const SNAPSHOT_SPACE = "qidao.eth";
+  const SNAPSHOT_SPACE = config.snapshotSpace;
 
   const cleanMarkdown = (rawMarkdown: string) => {
     // Remove frontmatter from the beginning of the markdown

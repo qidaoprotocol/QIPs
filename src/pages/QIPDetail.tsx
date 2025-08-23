@@ -5,6 +5,8 @@ import { useQIP } from '../hooks/useQIP'
 import Layout from '../layout'
 import FrontmatterTable from '../components/FrontmatterTable'
 import SnapshotSubmitter from '../components/SnapshotSubmitter'
+import { ethers } from 'ethers'
+import QIPRegistryABI from '../config/abis/QIPRegistry.json'
 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -15,6 +17,7 @@ const QIPDetail: React.FC = () => {
   const { address } = useAccount()
   const [isClient, setIsClient] = useState(false)
   const [canEdit, setCanEdit] = useState(false)
+  const [canSubmitSnapshot, setCanSubmitSnapshot] = useState(false)
 
   // Extract number from QIP-XXX format
   const qipNumberParsed = qipNumber?.replace('QIP-', '') || '0'
@@ -35,10 +38,34 @@ const QIPDetail: React.FC = () => {
   }, [])
 
   useEffect(() => {
-    if (address && qipData && qipData.author.toLowerCase() === address.toLowerCase()) {
-      setCanEdit(true)
+    const checkPermissions = async () => {
+      if (!address || !qipData) {
+        setCanEdit(false)
+        setCanSubmitSnapshot(false)
+        return
+      }
+
+      // Check if user is author
+      const isAuthor = qipData.author.toLowerCase() === address.toLowerCase()
+      
+      // Check if user has editor role
+      let isEditor = false
+      try {
+        const provider = new ethers.providers.JsonRpcProvider(rpcUrl)
+        const contract = new ethers.Contract(registryAddress, QIPRegistryABI, provider)
+        const editorRole = await contract.EDITOR_ROLE()
+        isEditor = await contract.hasRole(editorRole, address)
+      } catch (error) {
+        console.error('Error checking editor role:', error)
+      }
+
+      setCanEdit(isAuthor || isEditor)
+      // Editors can submit to snapshot even if they're not the author
+      setCanSubmitSnapshot(isAuthor || isEditor)
     }
-  }, [address, qipData])
+
+    checkPermissions()
+  }, [address, qipData, rpcUrl, registryAddress])
 
   if (loading) {
     return (
@@ -150,8 +177,8 @@ const QIPDetail: React.FC = () => {
             </div>
           </div>
 
-          {/* Snapshot submission for eligible statuses */}
-          {(qipData.status === 'Review' || qipData.status === 'Vote') && !qipData.proposal && qipData.proposal !== 'None' && (
+          {/* Snapshot submission for eligible statuses - visible to editors and authors */}
+          {canSubmitSnapshot && (qipData.status === 'Review' || qipData.status === 'Vote') && !qipData.proposal && qipData.proposal !== 'None' && (
             <div className="mt-8 border-t pt-8">
               <h2 className="text-2xl font-bold mb-4">Submit to Snapshot</h2>
               {isClient ? (

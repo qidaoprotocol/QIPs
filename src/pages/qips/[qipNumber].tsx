@@ -6,6 +6,8 @@ import { useAccount } from 'wagmi';
 import { Link } from 'gatsby';
 import { useQIPData } from '../../hooks/useQIPData';
 import { config } from '../../config';
+import { ethers } from 'ethers';
+import QIPRegistryABI from '../../config/abis/QIPRegistry.json';
 
 interface Props {
   params?: {
@@ -24,6 +26,7 @@ const DynamicQIPPage: React.FC<Props> = ({ params, location }) => {
   const { address } = useAccount();
   const [isClient, setIsClient] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
+  const [canSubmitSnapshot, setCanSubmitSnapshot] = useState(false);
   
   // Use the hook to fetch QIP data
   const { 
@@ -34,7 +37,6 @@ const DynamicQIPPage: React.FC<Props> = ({ params, location }) => {
     invalidateQIPs 
   } = useQIPData({
     registryAddress: config.qipRegistryAddress,
-    pinataJwt: config.pinataJwt,
     pinataGateway: config.pinataGateway,
     useLocalIPFS: config.useLocalIPFS,
   });
@@ -46,9 +48,33 @@ const DynamicQIPPage: React.FC<Props> = ({ params, location }) => {
   }, []);
 
   useEffect(() => {
-    if (address && qip && qip.author.toLowerCase() === address.toLowerCase()) {
-      setCanEdit(true);
-    }
+    const checkPermissions = async () => {
+      if (!address || !qip) {
+        setCanEdit(false);
+        setCanSubmitSnapshot(false);
+        return;
+      }
+
+      // Check if user is author
+      const isAuthor = qip.author.toLowerCase() === address.toLowerCase();
+      
+      // Check if user has editor role
+      let isEditor = false;
+      try {
+        const provider = new ethers.providers.JsonRpcProvider(config.baseRpcUrl);
+        const contract = new ethers.Contract(config.qipRegistryAddress, QIPRegistryABI, provider);
+        const editorRole = await contract.EDITOR_ROLE();
+        isEditor = await contract.hasRole(editorRole, address);
+      } catch (error) {
+        console.error('Error checking editor role:', error);
+      }
+
+      setCanEdit(isAuthor || isEditor);
+      // Editors can submit to snapshot even if they're not the author
+      setCanSubmitSnapshot(isAuthor || isEditor);
+    };
+
+    checkPermissions();
   }, [address, qip]);
 
   // Show loading state
@@ -194,8 +220,8 @@ const DynamicQIPPage: React.FC<Props> = ({ params, location }) => {
                 <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: htmlContent }} />
               </div>
 
-              {/* Only show Snapshot submitter for eligible statuses */}
-              {(qip.status === 'Review' || qip.status === 'Vote') && !qip.proposal && (
+              {/* Show Snapshot submitter for eligible statuses to editors and authors */}
+              {canSubmitSnapshot && (qip.status === 'Review' || qip.status === 'Vote') && !qip.proposal && (
                 <div className="flex flex-col w-full gap-y-3 items-left pb-10">
                   <span className="text-2xl font-bold text-black">Submit to Snapshot</span>
 
