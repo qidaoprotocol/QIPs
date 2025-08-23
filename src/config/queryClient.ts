@@ -51,8 +51,8 @@ export function createQueryClient(): QueryClient {
         refetchOnWindowFocus: false, // Don't refetch on window focus
         refetchOnReconnect: 'always', // Refetch when reconnecting
         
-        // Keep previous data while fetching
-        keepPreviousData: true,
+        // Keep previous data while fetching (replaced with placeholderData in v5)
+        placeholderData: (previousData: any) => previousData,
       },
       mutations: {
         retry: 2,
@@ -87,12 +87,12 @@ export function setupPersistentCache(queryClient: QueryClient) {
   
   if (persister) {
     persistQueryClient({
-      queryClient,
+      queryClient: queryClient as any,
       persister,
       maxAge: 24 * 60 * 60 * 1000, // 24 hours max age
-      hydrateOptions: {
-        // Don't hydrate queries older than 1 hour
-        shouldDehydrateQuery: (query) => {
+      dehydrateOptions: {
+        // Don't dehydrate queries older than 1 hour
+        shouldDehydrateQuery: (query: any) => {
           const state = query.state;
           const isOld = Date.now() - state.dataUpdatedAt > 60 * 60 * 1000;
           return !isOld;

@@ -44,7 +44,7 @@ export function useQIPVersionHistory({
         const versions: QIPVersion[] = [{
           version: Number(qip.version),
           ipfsUrl: qip.ipfsUrl,
-          updatedAt: new Date(Number(qip.lastUpdatedAt) * 1000).toISOString(),
+          updatedAt: new Date(Number(qip.lastUpdated) * 1000).toISOString(),
           author: qip.author,
         }];
 

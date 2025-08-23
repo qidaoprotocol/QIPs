@@ -211,7 +211,7 @@ export class QIPClient {
         },
       },
       pollingInterval: 4_000, // Poll every 4 seconds
-    });
+    }) as any;
     
     console.log("- PublicClient created:", !!this.publicClient);
   }
@@ -473,7 +473,7 @@ ${qipData.content}`;
    * Get the next QIP number (highest QIP + 1)
    */
   async getNextQIPNumber(): Promise<bigint> {
-    const result = await this.publicClient.readContract({
+    const result = await (this.publicClient as any).readContract({
       address: this.contractAddress,
       abi: QIP_REGISTRY_ABI,
       functionName: 'nextQIPNumber'
@@ -513,22 +513,22 @@ ${qipData.content}`;
       address: this.contractAddress,
       abi: QIP_REGISTRY_ABI,
       functionName: 'qips',
-      args: [qipNumber],
-      gas: 100000n // Explicit gas limit per call
+      args: [qipNumber]
+      // gas removed - not supported in multicall parameters
     }));
 
     try {
       // Use multicall to batch all requests into a single RPC call
       const results = await this.publicClient.multicall({
         contracts: calls,
-        allowFailure: true, // Allow individual calls to fail without failing the entire batch
-        gas: 500000n // Total gas limit for the multicall
+        allowFailure: true // Allow individual calls to fail without failing the entire batch
+        // gas removed - not supported in multicall parameters
       });
 
       const qips: QIP[] = [];
       
       for (let i = 0; i < results.length; i++) {
-        const result = results[i];
+        const result = results[i] as any;
         if (result.status === 'success' && result.result) {
           const data = result.result as any;
           // Only include QIPs that actually exist (qipNumber > 0)
@@ -596,20 +596,20 @@ ${qipData.content}`;
         address: this.contractAddress,
         abi: QIP_REGISTRY_ABI,
         functionName: 'getQIPsByStatus',
-        args: [status],
-        gas: 200000n // Gas limit per call
+        args: [status]
+        // gas removed - not supported in multicall parameters
       }));
 
       try {
         // Batch status queries with gas limit
         const results = await this.publicClient.multicall({
           contracts: calls,
-          allowFailure: true,
-          gas: 900000n // Total gas limit for multicall
+          allowFailure: true
+          // gas removed - not supported in multicall parameters
         });
         
         for (let j = 0; j < results.length; j++) {
-          const result = results[j];
+          const result = results[j] as any;
           const status = batchStatuses[j];
           
           if (result.status === 'success' && result.result) {
@@ -652,7 +652,7 @@ ${qipData.content}`;
         return [];
       }
       
-      return result;
+      return result as bigint[];
     } catch (error: any) {
       // Handle viem "no data" error which occurs when array is empty
       if (error.message?.includes('returned no data') || error.message?.includes('0x')) {
@@ -673,7 +673,7 @@ ${qipData.content}`;
       args: [author]
     });
     
-    return result;
+    return result as bigint[];
   }
 
   /**
@@ -693,13 +693,14 @@ ${qipData.content}`;
       eventName: 'QIPCreated',
       onLogs: (logs) => {
         logs.forEach(log => {
+          const args = log.args as any;
           callback({
             qipNumber: BigInt(log.topics[1]!),
             author: log.topics[2] as Address,
-            title: log.args.title,
-            network: log.args.network,
-            contentHash: log.args.contentHash,
-            ipfsUrl: log.args.ipfsUrl
+            title: args?.title || '',
+            network: args?.network || '',
+            contentHash: args?.contentHash || '0x',
+            ipfsUrl: args?.ipfsUrl || ''
           });
         });
       }

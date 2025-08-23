@@ -252,19 +252,16 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
                     console.warn(`[useQIPDataPaginated] ⚠️ IPFS fetch failed for QIP-${qipNumber}:`, error);
                     
                     // Cache failure for retry
-                    const previousRetryCount = ipfsData?.retryCount || 0;
+                    const previousRetryCount = (ipfsData as any)?.retryCount || 0;
                     const failedData = {
-                      error: error.message || 'Unknown error',
+                      error: (error as any).message || 'Unknown error',
                       lastFetchAttempt: Date.now(),
                       fetchSuccess: false,
                       retryCount: previousRetryCount + 1,
                       cid: blockchainData.ipfsUrl
                     };
                     
-                    queryClient.setQueryData(queryKeys.ipfs(blockchainData.ipfsUrl), failedData, {
-                      updatedAt: Date.now(),
-                      staleTime: 5 * 60 * 1000, // 5 minutes for failed fetches
-                    });
+                    queryClient.setQueryData(queryKeys.ipfs(blockchainData.ipfsUrl), failedData);
                   }
                 }
               }
@@ -569,15 +566,15 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
             const cached = queryClient.getQueryData(queryKeys.ipfs(qip.ipfsUrl));
             if (cached) {
               // Check if this is a failed fetch that should be retried
-              if (cached.fetchSuccess === false) {
-                const timeSinceLastAttempt = Date.now() - (cached.lastFetchAttempt || 0);
+              if ((cached as any).fetchSuccess === false) {
+                const timeSinceLastAttempt = Date.now() - ((cached as any).lastFetchAttempt || 0);
                 const shouldRetry = timeSinceLastAttempt > (5 * 60 * 1000); // 5 minutes
                 
-                if (shouldRetry && (cached.retryCount || 0) < 3) {
-                  console.log(`[useQIPDataPaginated]    │  ├─ 🔄 Retrying failed IPFS fetch: QIP-${qip.qipNumber} (attempt ${(cached.retryCount || 0) + 1})`);
+                if (shouldRetry && ((cached as any).retryCount || 0) < 3) {
+                  console.log(`[useQIPDataPaginated]    │  ├─ 🔄 Retrying failed IPFS fetch: QIP-${qip.qipNumber} (attempt ${((cached as any).retryCount || 0) + 1})`);
                   // Don't return cached - fall through to fetch again
                 } else {
-                  console.log(`[useQIPDataPaginated]    │  ├─ ❌ IPFS permanently failed: QIP-${qip.qipNumber} (${cached.retryCount || 1} attempts)`);
+                  console.log(`[useQIPDataPaginated]    │  ├─ ❌ IPFS permanently failed: QIP-${qip.qipNumber} (${(cached as any).retryCount || 1} attempts)`);
                   return { qip, ipfsContent: null };
                 }
               } else {
@@ -600,19 +597,16 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
               };
               
               // Cache the IPFS content with success indicator
-              queryClient.setQueryData(queryKeys.ipfs(qip.ipfsUrl), ipfsData, {
-                updatedAt: Date.now(),
-                staleTime: Infinity,
-              });
+              queryClient.setQueryData(queryKeys.ipfs(qip.ipfsUrl), ipfsData);
               
               return { qip, ipfsContent: ipfsData };
             } catch (error) {
               console.warn(`[useQIPDataPaginated]    │  ├─ ⚠️ IPFS fetch failed: QIP-${qip.qipNumber}`, error);
               
               // Cache failure information to track retry attempts
-              const previousRetryCount = cached?.retryCount || 0;
+              const previousRetryCount = (cached as any)?.retryCount || 0;
               const failedData = {
-                error: error.message || 'Unknown error',
+                error: (error as any).message || 'Unknown error',
                 lastFetchAttempt: Date.now(),
                 fetchSuccess: false,
                 retryCount: previousRetryCount + 1,
@@ -620,10 +614,7 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
               };
               
               // Cache the failure with a shorter stale time to allow retries
-              queryClient.setQueryData(queryKeys.ipfs(qip.ipfsUrl), failedData, {
-                updatedAt: Date.now(),
-                staleTime: 5 * 60 * 1000, // 5 minutes for failed fetches
-              });
+              queryClient.setQueryData(queryKeys.ipfs(qip.ipfsUrl), failedData);
               
               return { qip, ipfsContent: null };
             }
@@ -654,8 +645,8 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
           try {
             // Handle both 'body' and 'content' field names for consistency
             // Different parts of the app use different field names
-            const { frontmatter } = ipfsContent;
-            const content = ipfsContent.body || ipfsContent.content || '';
+            const { frontmatter } = ipfsContent as any;
+            const content = (ipfsContent as any).body || (ipfsContent as any).content || '';
 
             const implDate = qip.implementationDate > 0n 
               ? new Date(Number(qip.implementationDate) * 1000).toISOString().split("T")[0] 
@@ -824,7 +815,7 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
   // 1. We're still checking for cached pagination state, OR
   // 2. We're loading QIP numbers for the first time, OR  
   // 3. We're loading the initial page and haven't loaded any QIPs yet
-  const hasCachedData = paginationState?.loadedQIPs?.length > 0;
+  const hasCachedData = (paginationState?.loadedQIPs?.length || 0) > 0;
   const hasLoadedData = loadedQIPs.length > 0;
   
   // Only show loading on true first load (no cache, no data)

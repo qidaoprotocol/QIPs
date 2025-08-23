@@ -53,7 +53,7 @@ export function useUpdateQIPStatus(): UpdateQIPStatusResult {
       const publicClient = walletClient.chain ? 
         await import('viem').then(m => m.createPublicClient({
           chain: walletClient.chain,
-          transport: walletClient.transport
+          transport: m.http(import.meta.env.VITE_BASE_RPC_URL)
         })) : null;
       
       if (publicClient) {

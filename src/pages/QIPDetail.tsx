@@ -107,7 +107,7 @@ const QIPDetail: React.FC = () => {
             })
           ])
           
-          editorCheck = hasEditorRole || hasAdminRole
+          editorCheck = (hasEditorRole || hasAdminRole) as boolean
           // Cache the result
           roleCache.set(cacheKey, editorCheck)
           
@@ -150,7 +150,7 @@ const QIPDetail: React.FC = () => {
         <div className="container mx-auto px-4 py-8">
           <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
             <p className="font-bold">Error</p>
-            <p>{error || 'QIP not found'}</p>
+            <p>{typeof error === 'string' ? error : error?.toString() || 'QIP not found'}</p>
             <Link to="/all-proposals" className="mt-2 inline-block text-blue-600 hover:text-blue-800">
               ← Back to all proposals
             </Link>

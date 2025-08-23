@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { getIPFSService } from '../services/getIPFSService';
 import { CACHE_TIMES } from '../config/queryClient';
 
@@ -15,7 +16,7 @@ interface UseIPFSOptions {
 export function useCachedIPFS(cid: string | undefined, options: UseIPFSOptions = {}) {
   const ipfsService = getIPFSService();
   
-  return useQuery({
+  const query = useQuery({
     queryKey: ['ipfs', cid],
     queryFn: async () => {
       if (!cid) throw new Error('No CID provided');
@@ -38,15 +39,24 @@ export function useCachedIPFS(cid: string | undefined, options: UseIPFSOptions =
     gcTime: CACHE_TIMES.GC_TIME.IPFS_CONTENT, // 24 hours
     retry: 3,
     retryDelay: attemptIndex => Math.min(1000 * 2 ** attemptIndex, 10000),
-    onSuccess: data => {
-      console.debug(`[useCachedIPFS] Successfully cached CID: ${cid}`);
-      options.onSuccess?.(data.raw);
-    },
-    onError: (error: Error) => {
-      console.error(`[useCachedIPFS] Error fetching CID ${cid}:`, error);
-      options.onError?.(error);
-    },
   });
+
+  // Handle success/error callbacks with useEffect (TanStack Query v5 pattern)
+  useEffect(() => {
+    if (query.isSuccess && query.data) {
+      console.debug(`[useCachedIPFS] Successfully cached CID: ${cid}`);
+      options.onSuccess?.(query.data.raw);
+    }
+  }, [query.isSuccess, query.data, cid, options.onSuccess]);
+
+  useEffect(() => {
+    if (query.isError && query.error) {
+      console.error(`[useCachedIPFS] Error fetching CID ${cid}:`, query.error);
+      options.onError?.(query.error as Error);
+    }
+  }, [query.isError, query.error, cid, options.onError]);
+
+  return query;
 }
 
 /**

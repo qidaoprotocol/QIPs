@@ -21,7 +21,7 @@ const transports = {
 
 // Wagmi configuration
 const wagmiConfig = createConfig({
-  chains,
+  chains: chains as any, // Cast to any to avoid tuple type issues
   transports,
   connectors: [
     injected(),

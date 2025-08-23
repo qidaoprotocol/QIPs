@@ -44,8 +44,6 @@ const DynamicQIPPage: React.FC<Props> = ({ params, location }) => {
     invalidateQIPs 
   } = useQIPData({
     registryAddress: config.qipRegistryAddress,
-    pinataGateway: config.pinataGateway,
-    useLocalIPFS: config.useLocalIPFS,
   });
   
   const qip = blockchainQIPs.find((q: any) => q.qipNumber === qipNumber);

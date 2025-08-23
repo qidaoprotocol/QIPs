@@ -15,8 +15,17 @@ const ProposalStatus: React.FC<{ url: string }> = ({ url }) => {
     if (matches && matches[2]) {
         id = matches[2];
     }
-    const { data } = useSWR(
-        `{
+    const { data } = useSWR<{
+        proposal: {
+            state: string;
+            choices: string[];
+        } | null;
+        votes: Array<{
+            id: string;
+            choice: number;
+        }>;
+    }>(
+        id ? `{
       proposal(id: "${id}") {
         state
         choices
@@ -33,8 +42,8 @@ const ProposalStatus: React.FC<{ url: string }> = ({ url }) => {
         id
         choice
       }
-    }`,
-        fetcher
+    }` : null,
+        fetcher as any
     );
     const isLoading = !data;
     if (isLoading) return <>Loading status...</>;
@@ -42,14 +51,14 @@ const ProposalStatus: React.FC<{ url: string }> = ({ url }) => {
 
     const choices = flow(
         countBy('choice'),
-        mapKeys((k) => data.proposal.choices[k - 1])
-    )(data.votes);
+        mapKeys((k: string) => data.proposal?.choices[Number(k) - 1] || k)
+    )(data.votes || []);
 
     
     return (
         <div className='line-clamp-2 break-words'>
             <a className="text-blue-900" href={url} target="_blank" rel="noreferrer noopener">
-                {startCase(data?.proposal?.state)} &ndash; {data?.votes.length}{' '}
+                {startCase(data?.proposal?.state)} &ndash; {data?.votes?.length || 0}{' '}
                 vote(s)
             </a>
 

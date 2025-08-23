@@ -247,7 +247,9 @@ async function seedTestData() {
   for (const qip of testQIPs) {
     try {
       console.log(`📝 Uploading QIP-${qip.qip}: ${qip.title}`);
-      const { cid, ipfsUrl } = await ipfsService.uploadQIP(qip);
+      const uploadResult = await ipfsService.uploadQIP(JSON.stringify(qip));
+      const cid = (uploadResult as any).cid;
+      const ipfsUrl = (uploadResult as any).ipfsUrl;
       
       results.push({
         qip: qip.qip,
