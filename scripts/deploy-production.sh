@@ -354,7 +354,32 @@ echo -e "${BOLD}CREATE2:${NC}         0x4e59b44847b379578588920cA78FbF26c0B4956C
 echo ""
 
 # ============================================
-# STEP 4: Final Confirmation
+# STEP 4: Verification Option Check
+# ============================================
+if [ "$VERIFY_CONTRACT" = false ] && [ "$VERIFY_ON_BASESCAN" = true ] && [ "$DRY_RUN" = false ]; then
+    echo -e "${BOLD}${BLUE}🔍 Contract Verification Option${NC}"
+    echo "----------------------------------------"
+    echo -e "${YELLOW}You haven't enabled contract verification with --verify flag.${NC}"
+    echo ""
+    echo "Contract verification on Basescan:"
+    echo "  • Makes your contract source code publicly visible"
+    echo "  • Allows users to interact via Basescan interface"
+    echo "  • Builds trust through transparency"
+    echo ""
+    read -p "Would you like to verify the contract on Basescan? (y/N): " VERIFY_CHOICE
+    
+    if [ "$VERIFY_CHOICE" = "y" ] || [ "$VERIFY_CHOICE" = "Y" ]; then
+        VERIFY_CONTRACT=true
+        echo -e "${GREEN}  ✅ Contract verification enabled${NC}"
+    else
+        echo -e "${YELLOW}  ⚠️  Proceeding without verification${NC}"
+        echo "  You can verify later with: forge verify-contract"
+    fi
+    echo ""
+fi
+
+# ============================================
+# STEP 5: Final Confirmation
 # ============================================
 if [ "$DRY_RUN" = false ] && [ "$SKIP_CONFIRMATION" = false ]; then
     echo -e "${BOLD}${YELLOW}⚠️  PRODUCTION DEPLOYMENT WARNING${NC}"
@@ -366,6 +391,11 @@ if [ "$DRY_RUN" = false ] && [ "$SKIP_CONFIRMATION" = false ]; then
         echo -e "${BOLD}Estimated gas cost: $ESTIMATED_COST_ETH ETH${NC}"
     else
         echo -e "${BOLD}Estimated gas cost: ~0.002 ETH${NC}"
+    fi
+    if [ "$VERIFY_CONTRACT" = true ]; then
+        echo -e "${BOLD}Verification: ${GREEN}Enabled${NC}"
+    else
+        echo -e "${BOLD}Verification: ${YELLOW}Disabled${NC}"
     fi
     echo ""
     read -p "Type 'DEPLOY' to proceed or anything else to cancel: " CONFIRM
@@ -379,10 +409,10 @@ elif [ "$DRY_RUN" = true ]; then
 fi
 
 # ============================================
-# STEP 5: Execute Deployment
+# STEP 6: Execute Deployment
 # ============================================
 echo ""
-echo -e "${BOLD}${BLUE}🚀 Step 4: Executing Deployment${NC}"
+echo -e "${BOLD}${BLUE}🚀 Step 6: Executing Deployment${NC}"
 echo "----------------------------------------"
 
 # Create deployment directory
@@ -456,10 +486,10 @@ else
 fi
 
 # ============================================
-# STEP 6: Verify Deployment
+# STEP 7: Verify Deployment
 # ============================================
 echo ""
-echo -e "${BOLD}${BLUE}✅ Step 5: Verifying Deployment${NC}"
+echo -e "${BOLD}${BLUE}✅ Step 7: Verifying Deployment${NC}"
 echo "----------------------------------------"
 
 # Wait for transaction to be mined
@@ -487,11 +517,11 @@ else
 fi
 
 # ============================================
-# STEP 7: Contract Verification
+# STEP 8: Contract Verification
 # ============================================
 if [ "$VERIFY_ON_BASESCAN" = true ] && [ "$VERIFY_CONTRACT" = true ]; then
     echo ""
-    echo -e "${BOLD}${BLUE}🔍 Step 6: Verifying on Basescan${NC}"
+    echo -e "${BOLD}${BLUE}🔍 Step 8: Verifying on Basescan${NC}"
     echo "----------------------------------------"
     
     echo -e "${YELLOW}Submitting contract for verification...${NC}"
@@ -512,10 +542,10 @@ if [ "$VERIFY_ON_BASESCAN" = true ] && [ "$VERIFY_CONTRACT" = true ]; then
 fi
 
 # ============================================
-# STEP 8: Update Configuration
+# STEP 9: Update Configuration
 # ============================================
 echo ""
-echo -e "${BOLD}${BLUE}📝 Step 7: Updating Configuration${NC}"
+echo -e "${BOLD}${BLUE}📝 Step 9: Updating Configuration${NC}"
 echo "----------------------------------------"
 
 # Update .env.production
@@ -530,7 +560,7 @@ ln -sf "$DEPLOYMENT_RECORD" "$DEPLOYMENT_DIR/latest.json"
 echo -e "${GREEN}  ✅ Deployment record saved${NC}"
 
 # ============================================
-# STEP 9: Post-Deployment Instructions
+# STEP 10: Post-Deployment Instructions
 # ============================================
 echo ""
 echo -e "${BOLD}${GREEN}🎉 DEPLOYMENT SUCCESSFUL!${NC}"
@@ -550,8 +580,9 @@ echo "1. Update GitHub Secrets:"
 echo "   ${CYAN}gh secret set QIP_REGISTRY_ADDRESS --body \"$REGISTRY_ADDRESS\"${NC}"
 echo "   ${CYAN}gh secret set BASE_RPC_URL --body \"$BASE_RPC_URL\"${NC}"
 echo ""
-echo "2. Migrate existing QIPs (if needed):"
+echo "2. Migrate existing QIPs (fast batch migration):"
 echo "   ${CYAN}./scripts/migrate-with-keystore.sh --account=$KEYSTORE_ACCOUNT${NC}"
+echo "   Uses Foundry FFI for 5x faster batch migration (5 QIPs per transaction)"
 echo ""
 echo "3. Deploy frontend:"
 echo "   ${CYAN}git add -A && git commit -m \"Deploy registry to $REGISTRY_ADDRESS\"${NC}"
