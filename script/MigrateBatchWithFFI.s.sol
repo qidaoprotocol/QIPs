@@ -321,114 +321,71 @@ contract MigrateBatchWithFFI is Script {
     }
     
     /**
+     * @notice Helper function to extract field from QIP file
+     */
+    function extractField(string memory filePath, string memory fieldName) internal returns (string memory) {
+        string[] memory cmd = new string[](3);
+        cmd[0] = "bash";
+        cmd[1] = "-c";
+        cmd[2] = string.concat("grep '^", fieldName, ":' ", filePath, " | head -1 | sed 's/^", fieldName, ":[[:space:]]*//' | tr -d '\\n'");
+        bytes memory result = vm.ffi(cmd);
+        return string(result);
+    }
+    
+    /**
      * @notice Parse QIP file using FFI
      */
     function parseQIPFile(string memory filename, uint256 qipNumber) internal returns (QIPData memory) {
         string memory filePath = string.concat(QIP_DIR, "/", filename);
+        QIPData memory data;
         
-        // Extract title
-        string[] memory titleCmd = new string[](3);
-        titleCmd[0] = "bash";
-        titleCmd[1] = "-c";
-        titleCmd[2] = string.concat("grep '^title:' ", filePath, " | head -1 | sed 's/^title:[[:space:]]*//' | tr -d '\\n'");
-        bytes memory titleBytes = vm.ffi(titleCmd);
-        string memory title = string(titleBytes);
+        // Extract fields one by one to avoid stack too deep
+        data.qipNumber = qipNumber;
+        data.title = extractField(filePath, "title");
         
-        // Extract network
-        string[] memory networkCmd = new string[](3);
-        networkCmd[0] = "bash";
-        networkCmd[1] = "-c";
-        networkCmd[2] = string.concat("grep '^network:' ", filePath, " | head -1 | sed 's/^network:[[:space:]]*//' | tr -d '\\n'");
-        bytes memory networkBytes = vm.ffi(networkCmd);
-        string memory network = string(networkBytes);
-        if (bytes(network).length == 0) network = "Polygon";
+        string memory networkStr = extractField(filePath, "network");
+        data.network = bytes(networkStr).length == 0 ? "Polygon" : networkStr;
         
-        // Extract status
-        string[] memory statusCmd = new string[](3);
-        statusCmd[0] = "bash";
-        statusCmd[1] = "-c";
-        statusCmd[2] = string.concat("grep '^status:' ", filePath, " | head -1 | sed 's/^status:[[:space:]]*//' | tr -d '\\n'");
-        bytes memory statusBytes = vm.ffi(statusCmd);
-        string memory statusStr = string(statusBytes);
-        QIPRegistry.QIPStatus status = parseStatus(statusStr);
+        string memory statusStr = extractField(filePath, "status");
+        data.status = parseStatus(statusStr);
         
-        // Extract author
-        string[] memory authorCmd = new string[](3);
-        authorCmd[0] = "bash";
-        authorCmd[1] = "-c";
-        authorCmd[2] = string.concat("grep '^author:' ", filePath, " | head -1 | sed 's/^author:[[:space:]]*//' | tr -d '\\n'");
-        bytes memory authorBytes = vm.ffi(authorCmd);
-        string memory authorStr = string(authorBytes);
-        // Use a default address for now (in production, you'd map author names to addresses)
-        address author = address(0x0000000000000000000000000000000000000001);
-        // authorStr is used for logging below
+        // Use default author address for now
+        string memory authorStr = extractField(filePath, "author");
+        data.author = address(0x0000000000000000000000000000000000000001);
         
-        // Extract implementor
-        string[] memory implementorCmd = new string[](3);
-        implementorCmd[0] = "bash";
-        implementorCmd[1] = "-c";
-        implementorCmd[2] = string.concat("grep '^implementor:' ", filePath, " | head -1 | sed 's/^implementor:[[:space:]]*//' | tr -d '\\n'");
-        bytes memory implementorBytes = vm.ffi(implementorCmd);
-        string memory implementor = string(implementorBytes);
-        if (bytes(implementor).length == 0 || keccak256(implementorBytes) == keccak256(bytes("None"))) {
-            implementor = "None";
+        string memory implementorStr = extractField(filePath, "implementor");
+        if (bytes(implementorStr).length == 0 || keccak256(bytes(implementorStr)) == keccak256(bytes("None"))) {
+            data.implementor = "None";
+        } else {
+            data.implementor = implementorStr;
         }
         
-        // Extract implementation-date
-        string[] memory implDateCmd = new string[](3);
-        implDateCmd[0] = "bash";
-        implDateCmd[1] = "-c";
-        implDateCmd[2] = string.concat("grep '^implementation-date:' ", filePath, " | head -1 | sed 's/^implementation-date:[[:space:]]*//' | tr -d '\\n'");
-        bytes memory implDateBytes = vm.ffi(implDateCmd);
-        string memory implDateStr = string(implDateBytes);
-        uint256 implementationDate = parseDateToTimestamp(implDateStr);
+        string memory implDateStr = extractField(filePath, "implementation-date");
+        data.implementationDate = parseDateToTimestamp(implDateStr);
         
-        // Extract proposal
-        string[] memory proposalCmd = new string[](3);
-        proposalCmd[0] = "bash";
-        proposalCmd[1] = "-c";
-        proposalCmd[2] = string.concat("grep '^proposal:' ", filePath, " | head -1 | sed 's/^proposal:[[:space:]]*//' | tr -d '\\n'");
-        bytes memory proposalBytes = vm.ffi(proposalCmd);
-        string memory proposal = string(proposalBytes);
-        // Filter out TBU and None
-        if (keccak256(proposalBytes) == keccak256(bytes("TBU")) || 
-            keccak256(proposalBytes) == keccak256(bytes("tbu")) ||
-            keccak256(proposalBytes) == keccak256(bytes("None"))) {
-            proposal = "";
+        string memory proposalStr = extractField(filePath, "proposal");
+        if (keccak256(bytes(proposalStr)) == keccak256(bytes("TBU")) || 
+            keccak256(bytes(proposalStr)) == keccak256(bytes("tbu")) ||
+            keccak256(bytes(proposalStr)) == keccak256(bytes("None"))) {
+            data.proposal = "";
+        } else {
+            data.proposal = proposalStr;
         }
         
-        // Extract created date
-        string[] memory createdCmd = new string[](3);
-        createdCmd[0] = "bash";
-        createdCmd[1] = "-c";
-        createdCmd[2] = string.concat("grep '^created:' ", filePath, " | head -1 | sed 's/^created:[[:space:]]*//' | tr -d '\\n'");
-        bytes memory createdBytes = vm.ffi(createdCmd);
-        string memory createdStr = string(createdBytes);
-        uint256 created = parseDateToTimestamp(createdStr);
-        if (created == 0) {
-            created = block.timestamp - 30 days; // Default fallback
+        string memory createdStr = extractField(filePath, "created");
+        data.created = parseDateToTimestamp(createdStr);
+        if (data.created == 0) {
+            data.created = block.timestamp - 30 days; // Default fallback
         }
         
         console.log("  Parsed QIP-", qipNumber);
-        console.log("    Title:", title);
+        console.log("    Title:", data.title);
         console.log("    Status:", statusStr);
-        console.log("    Network:", network);
+        console.log("    Network:", data.network);
         console.log("    Author:", authorStr);
-        console.log("    Implementor:", implementor);
+        console.log("    Implementor:", data.implementor);
         
-        return QIPData({
-            qipNumber: qipNumber,
-            title: title,
-            network: network,
-            author: author,
-            status: status,
-            implementor: implementor,
-            implementationDate: implementationDate,
-            proposal: proposal,
-            created: created,
-            ipfsUrl: "",
-            contentHash: bytes32(0)
-        });
+        return data;
     }
     
     /**

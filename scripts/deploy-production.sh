@@ -191,16 +191,50 @@ else
 fi
 
 # Check if Basescan API key is configured in Foundry
-# Extract the key value from forge config
-BASESCAN_KEY=$(forge config | grep -A 1 "\[etherscan.base\]" | grep "key = " | cut -d'"' -f2)
+# Extract the key value from forge config (checking both possible locations)
+# First try to get Base-specific key, then fall back to general etherscan key
+BASESCAN_KEY=$(forge config 2>/dev/null | grep -A 2 "\[etherscan.base\]" | grep "key = " | cut -d'"' -f2)
+if [ -z "$BASESCAN_KEY" ]; then
+    BASESCAN_KEY=$(forge config 2>/dev/null | grep "^etherscan_api_key = " | cut -d'"' -f2)
+fi
 
 if [ -z "$BASESCAN_KEY" ] || [ "$BASESCAN_KEY" = "" ]; then
     echo -e "${YELLOW}  ⚠️  No Basescan API key found in ~/.foundry/foundry.toml${NC}"
-    echo -e "${YELLOW}      Contract verification will be skipped${NC}"
     VERIFY_ON_BASESCAN=false
+    
+    # If user requested verification but no API key, fail early
+    if [ "$VERIFY_CONTRACT" = true ]; then
+        echo -e "${RED}  ❌ Contract verification requested but no API key configured${NC}"
+        echo ""
+        echo "  To configure Basescan API key:"
+        echo "    1. Get API key from https://basescan.org/myapikey"
+        echo "    2. Add to ~/.foundry/foundry.toml:"
+        echo "       [etherscan.base]"
+        echo "       key = \"YOUR_API_KEY\""
+        exit 1
+    else
+        echo -e "${YELLOW}      Contract verification will be skipped${NC}"
+    fi
 else
     echo -e "${GREEN}  ✅ Basescan API key configured in Foundry${NC}"
     VERIFY_ON_BASESCAN=true
+    
+    # If API key exists but verification not requested, offer to enable it
+    if [ "$VERIFY_CONTRACT" = false ] && [ "$DRY_RUN" = false ] && [ "$SKIP_CONFIRMATION" = false ]; then
+        echo ""
+        echo -e "${BOLD}${BLUE}🔍 Contract Verification Option${NC}"
+        echo "  Verification makes your contract source code publicly visible"
+        echo "  and allows users to interact via Basescan interface."
+        echo ""
+        read -p "  Would you like to verify the contract on Basescan? (y/N): " VERIFY_CHOICE
+        
+        if [ "$VERIFY_CHOICE" = "y" ] || [ "$VERIFY_CHOICE" = "Y" ]; then
+            VERIFY_CONTRACT=true
+            echo -e "${GREEN}  ✅ Contract verification enabled${NC}"
+        else
+            echo -e "${YELLOW}  ⚠️  Proceeding without verification${NC}"
+        fi
+    fi
 fi
 
 if [ "$ENV_OK" = false ]; then
@@ -354,32 +388,7 @@ echo -e "${BOLD}CREATE2:${NC}         0x4e59b44847b379578588920cA78FbF26c0B4956C
 echo ""
 
 # ============================================
-# STEP 4: Verification Option Check
-# ============================================
-if [ "$VERIFY_CONTRACT" = false ] && [ "$VERIFY_ON_BASESCAN" = true ] && [ "$DRY_RUN" = false ]; then
-    echo -e "${BOLD}${BLUE}🔍 Contract Verification Option${NC}"
-    echo "----------------------------------------"
-    echo -e "${YELLOW}You haven't enabled contract verification with --verify flag.${NC}"
-    echo ""
-    echo "Contract verification on Basescan:"
-    echo "  • Makes your contract source code publicly visible"
-    echo "  • Allows users to interact via Basescan interface"
-    echo "  • Builds trust through transparency"
-    echo ""
-    read -p "Would you like to verify the contract on Basescan? (y/N): " VERIFY_CHOICE
-    
-    if [ "$VERIFY_CHOICE" = "y" ] || [ "$VERIFY_CHOICE" = "Y" ]; then
-        VERIFY_CONTRACT=true
-        echo -e "${GREEN}  ✅ Contract verification enabled${NC}"
-    else
-        echo -e "${YELLOW}  ⚠️  Proceeding without verification${NC}"
-        echo "  You can verify later with: forge verify-contract"
-    fi
-    echo ""
-fi
-
-# ============================================
-# STEP 5: Final Confirmation
+# STEP 4: Final Confirmation
 # ============================================
 if [ "$DRY_RUN" = false ] && [ "$SKIP_CONFIRMATION" = false ]; then
     echo -e "${BOLD}${YELLOW}⚠️  PRODUCTION DEPLOYMENT WARNING${NC}"
@@ -409,10 +418,10 @@ elif [ "$DRY_RUN" = true ]; then
 fi
 
 # ============================================
-# STEP 6: Execute Deployment
+# STEP 5: Execute Deployment
 # ============================================
 echo ""
-echo -e "${BOLD}${BLUE}🚀 Step 6: Executing Deployment${NC}"
+echo -e "${BOLD}${BLUE}🚀 Step 5: Executing Deployment${NC}"
 echo "----------------------------------------"
 
 # Create deployment directory
@@ -486,10 +495,10 @@ else
 fi
 
 # ============================================
-# STEP 7: Verify Deployment
+# STEP 6: Verify Deployment
 # ============================================
 echo ""
-echo -e "${BOLD}${BLUE}✅ Step 7: Verifying Deployment${NC}"
+echo -e "${BOLD}${BLUE}✅ Step 6: Verifying Deployment${NC}"
 echo "----------------------------------------"
 
 # Wait for transaction to be mined
@@ -517,11 +526,11 @@ else
 fi
 
 # ============================================
-# STEP 8: Contract Verification
+# STEP 7: Contract Verification
 # ============================================
 if [ "$VERIFY_ON_BASESCAN" = true ] && [ "$VERIFY_CONTRACT" = true ]; then
     echo ""
-    echo -e "${BOLD}${BLUE}🔍 Step 8: Verifying on Basescan${NC}"
+    echo -e "${BOLD}${BLUE}🔍 Step 7: Verifying on Basescan${NC}"
     echo "----------------------------------------"
     
     echo -e "${YELLOW}Submitting contract for verification...${NC}"
@@ -542,10 +551,10 @@ if [ "$VERIFY_ON_BASESCAN" = true ] && [ "$VERIFY_CONTRACT" = true ]; then
 fi
 
 # ============================================
-# STEP 9: Update Configuration
+# STEP 8: Update Configuration
 # ============================================
 echo ""
-echo -e "${BOLD}${BLUE}📝 Step 9: Updating Configuration${NC}"
+echo -e "${BOLD}${BLUE}📝 Step 8: Updating Configuration${NC}"
 echo "----------------------------------------"
 
 # Update .env.production
@@ -560,7 +569,7 @@ ln -sf "$DEPLOYMENT_RECORD" "$DEPLOYMENT_DIR/latest.json"
 echo -e "${GREEN}  ✅ Deployment record saved${NC}"
 
 # ============================================
-# STEP 10: Post-Deployment Instructions
+# STEP 9: Post-Deployment Instructions
 # ============================================
 echo ""
 echo -e "${BOLD}${GREEN}🎉 DEPLOYMENT SUCCESSFUL!${NC}"
