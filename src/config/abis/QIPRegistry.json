@@ -87,6 +87,13 @@
     "stateMutability": "view"
   },
   {
+    "inputs": [],
+    "name": "nextQIPNumber",
+    "outputs": [{ "name": "", "type": "uint256" }],
+    "type": "function",
+    "stateMutability": "view"
+  },
+  {
     "inputs": [
       { "name": "role", "type": "bytes32" },
       { "name": "account", "type": "address" }

@@ -131,21 +131,102 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
   } = useQuery({
     queryKey: ['qip-numbers', registryAddress],
     queryFn: async () => {
-      if (!qipClient) return { numbers: [], total: 0 };
+      if (!qipClient) {
+        console.log("[useQIPDataPaginated] ❌ No QIP client available");
+        return { numbers: [], total: 0 };
+      }
 
-      console.log("[useQIPDataPaginated] Fetching all QIP numbers...");
+      console.log("[useQIPDataPaginated] 🔍 Starting QIP discovery phase...");
+      console.log("[useQIPDataPaginated] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
       
-      // Get all QIP numbers using multicall
-      const statusMap = await qipClient.getAllQIPsByStatusBatch();
+      // Get the next QIP number (highest + 1)
+      console.log("[useQIPDataPaginated] 📊 Fetching nextQIPNumber from contract...");
       
-      // Collect unique QIP numbers
-      const numbers = new Set<bigint>();
-      for (const qipNumbers of statusMap.values()) {
-        qipNumbers.forEach(n => numbers.add(n));
+      let nextQIPNumber: bigint;
+      try {
+        nextQIPNumber = await qipClient.getNextQIPNumber();
+        console.log(`[useQIPDataPaginated] ✅ nextQIPNumber: ${nextQIPNumber}`);
+      } catch (error) {
+        console.error("[useQIPDataPaginated] ❌ Failed to fetch nextQIPNumber:", error);
+        console.log("[useQIPDataPaginated] 🔧 Using fallback value: 248");
+        nextQIPNumber = 248n;
       }
       
-      const sortedNumbers = Array.from(numbers).sort((a, b) => Number(b - a)); // Sort descending
-      console.log(`[useQIPDataPaginated] Found ${sortedNumbers.length} QIPs total`);
+      // Known minimum QIP number (where migration started)
+      const MIN_QIP_NUMBER = 209n;
+      const maxQIP = nextQIPNumber > 0n ? nextQIPNumber - 1n : 247n;
+      
+      console.log(`[useQIPDataPaginated] 📋 QIP Range: ${MIN_QIP_NUMBER} to ${maxQIP}`);
+      console.log(`[useQIPDataPaginated] 📦 Total slots to check: ${Number(maxQIP - MIN_QIP_NUMBER + 1n)}`);
+      
+      // Discovery: Find which QIPs actually exist
+      const existingNumbers: bigint[] = [];
+      const DISCOVERY_BATCH_SIZE = 5; // Reduced from 10 to avoid rate limits
+      let checkedCount = 0;
+      let foundCount = 0;
+      let batchNumber = 0;
+      const totalBatches = Math.ceil(Number(maxQIP - MIN_QIP_NUMBER + 1n) / DISCOVERY_BATCH_SIZE);
+      
+      console.log(`[useQIPDataPaginated] 🔎 Discovering existing QIPs in batches of ${DISCOVERY_BATCH_SIZE}...`);
+      console.log(`[useQIPDataPaginated]    Total batches to check: ${totalBatches}`);
+      
+      for (let i = MIN_QIP_NUMBER; i <= maxQIP; i += BigInt(DISCOVERY_BATCH_SIZE)) {
+        const batchEnd = i + BigInt(DISCOVERY_BATCH_SIZE - 1) > maxQIP ? maxQIP : i + BigInt(DISCOVERY_BATCH_SIZE - 1);
+        const batchNumbers: bigint[] = [];
+        batchNumber++;
+        
+        for (let j = i; j <= batchEnd; j++) {
+          batchNumbers.push(j);
+        }
+        
+        console.log(`[useQIPDataPaginated] 📡 Batch ${batchNumber}/${totalBatches}: Checking QIP ${i} to ${batchEnd} (${batchNumbers.length} items)`);
+        
+        // Add delay between batches to avoid rate limiting (except for first batch)
+        if (batchNumber > 1) {
+          const delay = Math.min(200 * batchNumber, 1000); // Progressive delay, max 1 second
+          console.log(`[useQIPDataPaginated]    ⏱️ Waiting ${delay}ms to avoid rate limits...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+        
+        try {
+          // Fetch batch to see which QIPs exist
+          const batchQIPs = await qipClient.getQIPsBatch(batchNumbers);
+          const foundInBatch = batchQIPs.filter(qip => qip && qip.qipNumber > 0n).length;
+          
+          console.log(`[useQIPDataPaginated]    ├─ Found: ${foundInBatch}/${batchNumbers.length} QIPs exist`);
+          
+          for (const qip of batchQIPs) {
+            if (qip && qip.qipNumber > 0n) {
+              existingNumbers.push(qip.qipNumber);
+              console.log(`[useQIPDataPaginated]    ├─ ✓ QIP-${qip.qipNumber}: "${qip.title}"`);
+              foundCount++;
+            }
+          }
+          
+          checkedCount += batchNumbers.length;
+          
+          // Add non-existent QIPs to log
+          const foundNumbers = new Set(batchQIPs.map(q => q.qipNumber));
+          const missing = batchNumbers.filter(n => !foundNumbers.has(n));
+          if (missing.length > 0) {
+            console.log(`[useQIPDataPaginated]    └─ ✗ Missing: ${missing.join(', ')}`);
+          }
+          
+        } catch (error) {
+          console.error(`[useQIPDataPaginated] ❌ Error fetching batch ${i}-${batchEnd}:`, error);
+        }
+      }
+      
+      // Sort descending (newest first)
+      const sortedNumbers = existingNumbers.sort((a, b) => Number(b - a));
+      
+      console.log("[useQIPDataPaginated] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+      console.log(`[useQIPDataPaginated] 📊 Discovery Complete:`);
+      console.log(`[useQIPDataPaginated]    ├─ Slots checked: ${checkedCount}`);
+      console.log(`[useQIPDataPaginated]    ├─ QIPs found: ${foundCount}`);
+      console.log(`[useQIPDataPaginated]    ├─ Missing: ${checkedCount - foundCount}`);
+      console.log(`[useQIPDataPaginated]    └─ QIP numbers: [${sortedNumbers.slice(0, 5).join(', ')}${sortedNumbers.length > 5 ? ', ...' : ''}]`);
+      console.log("[useQIPDataPaginated] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
       
       return {
         numbers: sortedNumbers,
@@ -166,26 +247,44 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
 
   // Step 2: Fetch QIP details for current page
   const fetchQIPsForPage = useCallback(async (pageNum: number): Promise<QIPData[]> => {
-    if (!qipClient || allQIPNumbers.length === 0) return [];
+    if (!qipClient || allQIPNumbers.length === 0) {
+      console.log("[useQIPDataPaginated] ⚠️ Cannot fetch page - no client or no QIP numbers");
+      return [];
+    }
 
     const startIdx = pageNum * pageSize;
     const endIdx = Math.min(startIdx + pageSize, allQIPNumbers.length);
     const pageNumbers = allQIPNumbers.slice(startIdx, endIdx);
 
-    if (pageNumbers.length === 0) return [];
+    if (pageNumbers.length === 0) {
+      console.log(`[useQIPDataPaginated] ⚠️ Page ${pageNum + 1} has no QIP numbers`);
+      return [];
+    }
 
-    console.log(`[useQIPDataPaginated] Fetching page ${pageNum + 1} (QIPs ${startIdx + 1}-${endIdx})`);
+    console.log("[useQIPDataPaginated] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log(`[useQIPDataPaginated] 📄 Fetching Page ${pageNum + 1}`);
+    console.log(`[useQIPDataPaginated]    ├─ Index range: ${startIdx + 1}-${endIdx} of ${allQIPNumbers.length} total`);
+    console.log(`[useQIPDataPaginated]    ├─ QIP numbers: [${pageNumbers.join(', ')}]`);
+    console.log(`[useQIPDataPaginated]    └─ Items on page: ${pageNumbers.length}`);
 
     const qips: QIPData[] = [];
+    
+    console.log(`[useQIPDataPaginated] 🔄 Starting batch fetch process...`);
     
     // Batch fetch QIPs using multicall
     const BATCH_SIZE = 5;
     for (let i = 0; i < pageNumbers.length; i += BATCH_SIZE) {
       const batch = pageNumbers.slice(i, Math.min(i + BATCH_SIZE, pageNumbers.length));
+      const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+      const totalBatches = Math.ceil(pageNumbers.length / BATCH_SIZE);
+      
+      console.log(`[useQIPDataPaginated] 📦 Batch ${batchNum}/${totalBatches}: QIPs [${batch.join(', ')}]`);
       
       try {
         // Fetch blockchain data
+        console.log(`[useQIPDataPaginated]    ├─ 🔗 Fetching blockchain data...`);
         const batchQIPs = await qipClient.getQIPsBatch(batch);
+        console.log(`[useQIPDataPaginated]    ├─ ✅ Got ${batchQIPs.length} QIPs from blockchain`);
         
         // Collect all IPFS CIDs for concurrent fetching
         const cidsToFetch = batchQIPs
@@ -193,19 +292,29 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
           .map(qip => qip.ipfsUrl.startsWith("ipfs://") ? qip.ipfsUrl.slice(7) : qip.ipfsUrl);
         
         // Fetch all IPFS content concurrently using rotating gateways
-        console.debug(`[useQIPDataPaginated] Fetching ${cidsToFetch.length} QIPs from IPFS concurrently`);
+        console.log(`[useQIPDataPaginated]    ├─ 🌐 Fetching ${cidsToFetch.length} QIPs from IPFS...`);
         const ipfsContents = await ipfsService.fetchMultipleQIPs(cidsToFetch);
+        console.log(`[useQIPDataPaginated]    ├─ ✅ Got ${ipfsContents.size} IPFS responses`);
         
         // Process each QIP with its IPFS content
+        console.log(`[useQIPDataPaginated]    ├─ 📝 Processing ${batchQIPs.length} QIPs...`);
+        let processedCount = 0;
+        let skippedCount = 0;
+        
         for (const qip of batchQIPs) {
-          if (!qip || qip.qipNumber === 0n) continue;
+          if (!qip || qip.qipNumber === 0n) {
+            console.log(`[useQIPDataPaginated]       ├─ ⚠️ Skipping empty QIP slot`);
+            skippedCount++;
+            continue;
+          }
           
           try {
             const cid = qip.ipfsUrl.startsWith("ipfs://") ? qip.ipfsUrl.slice(7) : qip.ipfsUrl;
             const ipfsContent = ipfsContents.get(cid);
             
             if (!ipfsContent) {
-              console.warn(`[useQIPDataPaginated] No IPFS content found for QIP ${qip.qipNumber}, CID: ${cid}`);
+              console.warn(`[useQIPDataPaginated]       ├─ ⚠️ QIP-${qip.qipNumber}: No IPFS content (CID: ${cid})`);
+              skippedCount++;
               continue;
             }
             
@@ -216,7 +325,6 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
               : "None";
 
             const statusString = qipClient.getStatusString(qip.status);
-            console.debug(`[useQIPDataPaginated] QIP ${qip.qipNumber} - Status: ${qip.status} -> ${statusString}`);
             
             const qipData: QIPData = {
               qipNumber: Number(qip.qipNumber),
@@ -267,19 +375,30 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
             }, { updatedAt: Date.now() });
             
             qips.push(qipData);
+            processedCount++;
+            console.log(`[useQIPDataPaginated]       ├─ ✅ QIP-${qip.qipNumber}: "${qip.title}" (${statusString})`);
           } catch (error) {
-            console.error(`[useQIPDataPaginated] Error processing QIP ${qip.qipNumber}:`, error);
+            console.error(`[useQIPDataPaginated]       ├─ ❌ QIP-${qip.qipNumber}: Processing failed:`, error);
+            skippedCount++;
           }
         }
+        
+        console.log(`[useQIPDataPaginated]    └─ Batch complete: ${processedCount} processed, ${skippedCount} skipped`);
         
         // Small delay between batches (reduced since IPFS is now concurrent)
         if (i + BATCH_SIZE < pageNumbers.length) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
       } catch (error) {
-        console.error(`[useQIPDataPaginated] Error fetching batch:`, error);
+        console.error(`[useQIPDataPaginated] ❌ Batch ${batchNum} failed:`, error);
+        console.error(`[useQIPDataPaginated]    └─ Error details:`, error);
       }
     }
+
+    console.log("[useQIPDataPaginated] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log(`[useQIPDataPaginated] ✅ Page Complete`);
+    console.log(`[useQIPDataPaginated]    └─ Successfully loaded: ${qips.length} QIPs`);
+    console.log("[useQIPDataPaginated] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
     return qips;
   }, [qipClient, allQIPNumbers, pageSize, ipfsService]);

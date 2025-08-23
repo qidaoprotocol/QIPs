@@ -192,8 +192,10 @@ export class QIPClient {
     console.log("- Using chain:", chain.name, "with ID:", chain.id);
     
     // Create load balanced transport with multiple RPC endpoints
-    const rpcEndpoints = rpcUrl ? [rpcUrl] : getRPCEndpoints();
+    // Always use multiple endpoints for load balancing, even if one is provided
+    const rpcEndpoints = getRPCEndpoints();
     console.log(`- Using ${rpcEndpoints.length} RPC endpoints with load balancing`);
+    console.log(`- RPC endpoints:`, rpcEndpoints.slice(0, 3).join(', '), '...');
     
     const transport = rpcEndpoints.length > 1
       ? loadBalance(rpcEndpoints.map(url => http(url)))
@@ -204,8 +206,8 @@ export class QIPClient {
       transport,
       batch: {
         multicall: {
-          batchSize: 5, // Reduced to avoid gas limits
-          wait: 10, // Wait 10ms to batch requests
+          batchSize: 3, // Further reduced to avoid rate limits
+          wait: 50, // Increased wait time to batch requests
         },
       },
       pollingInterval: 4_000, // Poll every 4 seconds
@@ -461,19 +463,38 @@ ${qipData.content}`;
   }
 
   /**
+   * Get the next QIP number (highest QIP + 1)
+   */
+  async getNextQIPNumber(): Promise<bigint> {
+    const result = await this.publicClient.readContract({
+      address: this.contractAddress,
+      abi: QIP_REGISTRY_ABI,
+      functionName: 'nextQIPNumber'
+    });
+    
+    return result as bigint;
+  }
+
+  /**
    * Get multiple QIPs using multicall for efficiency
    */
   async getQIPsBatch(qipNumbers: bigint[]): Promise<QIP[]> {
     if (qipNumbers.length === 0) return [];
 
-    // Limit batch size to avoid gas limits (each QIP read uses ~30k gas)
-    const MAX_BATCH_SIZE = 5; // Reduced from 10 to stay well under 1M gas limit
+    // Limit batch size to avoid gas limits and rate limits
+    const MAX_BATCH_SIZE = 3; // Reduced to avoid rate limits
     
     if (qipNumbers.length > MAX_BATCH_SIZE) {
       // Split into smaller batches if needed
       const results: QIP[] = [];
       for (let i = 0; i < qipNumbers.length; i += MAX_BATCH_SIZE) {
         const batch = qipNumbers.slice(i, Math.min(i + MAX_BATCH_SIZE, qipNumbers.length));
+        
+        // Add small delay between recursive calls to avoid rate limits
+        if (i > 0) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
         const batchResults = await this.getQIPsBatch(batch);
         results.push(...batchResults);
       }
@@ -503,21 +524,24 @@ ${qipData.content}`;
         const result = results[i];
         if (result.status === 'success' && result.result) {
           const data = result.result as any;
-          qips.push({
-            qipNumber: data[0],
-            author: data[1],
-            title: data[2],
-            network: data[3],
-            contentHash: data[4],
-            ipfsUrl: data[5],
-            createdAt: data[6],
-            lastUpdated: data[7],
-            status: data[8] as QIPStatus,
-            implementor: data[9],
-            implementationDate: data[10],
-            snapshotProposalId: data[11],
-            version: data[12]
-          });
+          // Only include QIPs that actually exist (qipNumber > 0)
+          if (data[0] > 0n) {
+            qips.push({
+              qipNumber: data[0],
+              author: data[1],
+              title: data[2],
+              network: data[3],
+              contentHash: data[4],
+              ipfsUrl: data[5],
+              createdAt: data[6],
+              lastUpdated: data[7],
+              status: data[8] as QIPStatus,
+              implementor: data[9],
+              implementationDate: data[10],
+              snapshotProposalId: data[11],
+              version: data[12]
+            });
+          }
         }
       }
 
