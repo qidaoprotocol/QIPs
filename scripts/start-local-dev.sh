@@ -7,36 +7,64 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
+# Clear any stale environment variables from previous runs
+unset QIP_REGISTRY_ADDRESS
+unset VITE_QIP_REGISTRY_ADDRESS
+unset GATSBY_QIP_REGISTRY_ADDRESS
+unset DEPLOYER_ADDRESS
+unset PRIVATE_KEY
+
+echo -e "${YELLOW}Cleared stale environment variables${NC}"
+
 # Parse command line arguments
 MIGRATE_QIPS=false
-IMPERSONATE_ADDRESS=""
-COMPUTE_ONLY=false
-for arg in "$@"; do
-    case $arg in
+KEYSTORE_ACCOUNT=""
+USE_KEYSTORE=false
+
+echo -e "${BLUE}Parsing arguments: $@${NC}"
+
+while [[ $# -gt 0 ]]; do
+    echo -e "${YELLOW}Processing argument: $1${NC}"
+    case $1 in
         --migrate)
             MIGRATE_QIPS=true
+            echo -e "${GREEN}  → Migration enabled${NC}"
             shift
             ;;
-        --impersonate=*)
-            IMPERSONATE_ADDRESS="${arg#*=}"
+        --keystore=*)
+            KEYSTORE_ACCOUNT="${1#*=}"
+            USE_KEYSTORE=true
+            echo -e "${GREEN}  → Keystore account (=): $KEYSTORE_ACCOUNT${NC}"
             shift
             ;;
-        --compute-only)
-            COMPUTE_ONLY=true
+        --keystore)
+            shift
+            KEYSTORE_ACCOUNT="$1"
+            USE_KEYSTORE=true
+            echo -e "${GREEN}  → Keystore account: $KEYSTORE_ACCOUNT${NC}"
             shift
             ;;
         --help)
             echo "Usage: $0 [options]"
             echo "Options:"
             echo "  --migrate                    Run migration script to populate QIPs 209-248 from existing files"
-            echo "  --impersonate=<address>      Deploy contracts as a specific address (gets deterministic address)"
-            echo "  --compute-only               Only compute the deployment address without starting services"
+            echo "  --keystore <account>         Use keystore account for deployment (e.g., deployer, devwallet)"
+            echo "  --keystore=<account>         Alternative syntax for keystore"
             echo "  --help                       Show this help message"
             echo ""
             echo "Examples:"
-            echo "  $0 --impersonate=0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7"
-            echo "  $0 --impersonate=0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb7 --compute-only"
+            echo "  $0 --migrate                        # Use default private key"
+            echo "  $0 --keystore deployer --migrate    # Use keystore account (space)"
+            echo "  $0 --keystore=deployer --migrate    # Use keystore account (equals)"
+            echo ""
+            echo "Available keystore accounts:"
+            cast wallet list 2>/dev/null || echo "  (run 'cast wallet list' to see available accounts)"
             exit 0
+            ;;
+        *)
+            echo -e "${RED}Unknown option: $1${NC}"
+            echo "Use --help for usage information"
+            exit 1
             ;;
     esac
 done
@@ -44,31 +72,33 @@ done
 echo -e "${BLUE}🚀 Starting QIPs Local Development Environment (Vite)${NC}"
 echo "================================================"
 
-# If compute-only mode, just compute the address and exit
-if [ "$COMPUTE_ONLY" = true ]; then
-    echo -e "${BLUE}📊 Computing Deployment Address${NC}"
-    
-    if [ -z "$IMPERSONATE_ADDRESS" ]; then
-        echo -e "${YELLOW}Computing addresses for common test accounts...${NC}"
-        forge script script/DeployWithImpersonation.s.sol:DeployWithImpersonation \
-            --sig "computeAddressesForMultiple()" \
-            --rpc-url http://localhost:8545 2>/dev/null || \
-        forge script script/DeployWithImpersonation.s.sol:DeployWithImpersonation \
-            --sig "computeAddressesForMultiple()"
-    else
-        echo -e "${YELLOW}Computing address for: $IMPERSONATE_ADDRESS${NC}"
-        IMPERSONATE_ADDRESS=$IMPERSONATE_ADDRESS forge script script/DeployWithImpersonation.s.sol:DeployWithImpersonation \
-            --sig "computeAddressOnly()" \
-            --rpc-url http://localhost:8545 2>/dev/null || \
-        IMPERSONATE_ADDRESS=$IMPERSONATE_ADDRESS forge script script/DeployWithImpersonation.s.sol:DeployWithImpersonation \
-            --sig "computeAddressOnly()"
+# Validate keystore account if specified and get the address
+if [ "$USE_KEYSTORE" = true ]; then
+    if ! cast wallet list 2>/dev/null | grep -q "$KEYSTORE_ACCOUNT"; then
+        echo -e "${RED}❌ Error: Keystore account '$KEYSTORE_ACCOUNT' not found${NC}"
+        echo "Available accounts:"
+        cast wallet list 2>/dev/null || echo "No keystore accounts found. Create one with: cast wallet import <name> --interactive"
+        exit 1
     fi
     
-    echo ""
-    echo -e "${GREEN}✅ Address computation complete${NC}"
-    echo -e "${YELLOW}Note: These addresses assume deployment with the standard CREATE2 deployer${NC}"
-    echo -e "${YELLOW}      at 0x4e59b44847b379578588920cA78FbF26c0B4956C${NC}"
-    exit 0
+    # Get the address for the keystore account
+    KEYSTORE_ADDRESS=$(cast wallet address --account $KEYSTORE_ACCOUNT 2>/dev/null)
+    if [ -z "$KEYSTORE_ADDRESS" ]; then
+        echo -e "${RED}❌ Error: Could not retrieve address for keystore account '$KEYSTORE_ACCOUNT'${NC}"
+        exit 1
+    fi
+    
+    echo -e "${GREEN}✅ Using keystore account: $KEYSTORE_ACCOUNT${NC}"
+    echo -e "${GREEN}   Address: $KEYSTORE_ADDRESS${NC}"
+fi
+
+# Set deployment method
+if [ "$USE_KEYSTORE" = true ]; then
+    DEPLOY_METHOD="keystore"
+    echo -e "${BLUE}Using keystore for deterministic deployment${NC}"
+else
+    DEPLOY_METHOD="privatekey"
+    echo -e "${BLUE}Using default Anvil account for deployment${NC}"
 fi
 
 # Function to cleanup on exit
@@ -269,11 +299,12 @@ fi
 
 # Start Anvil
 echo -e "\n${GREEN}1. Starting Anvil (Base fork)...${NC}"
-anvil --fork-url https://mainnet.base.org \
-      --accounts 10 \
-      --balance 10000 \
-      --block-time 2 \
-      --port 8545 > /tmp/anvil.log 2>&1 &
+
+# Standard Anvil command without impersonation
+ANVIL_CMD="anvil --fork-url https://mainnet.base.org --accounts 10 --balance 10000 --block-time 2 --port 8545"
+
+# Start Anvil
+eval "$ANVIL_CMD > /tmp/anvil.log 2>&1 &"
 
 ANVIL_PID=$!
 echo "Anvil PID: $ANVIL_PID"
@@ -302,16 +333,19 @@ echo -e "${GREEN}✅ Anvil is running on http://localhost:8545${NC}"
 # Deploy contracts using deterministic CREATE2 deployment
 echo -e "\n${GREEN}2. Deploying QIP Registry contract (deterministic)...${NC}"
 
-if [ -n "$IMPERSONATE_ADDRESS" ]; then
-    echo -e "${YELLOW}Using impersonation for address: $IMPERSONATE_ADDRESS${NC}"
-    DEPLOY_OUTPUT=$(IMPERSONATE_ADDRESS=$IMPERSONATE_ADDRESS forge script script/DeployWithImpersonation.s.sol:DeployWithImpersonation \
-        --sig "runWithImpersonation()" \
+if [ "$DEPLOY_METHOD" = "keystore" ]; then
+    echo -e "${YELLOW}Deploying with keystore account: $KEYSTORE_ADDRESS${NC}"
+    # Deploy using keystore account
+    DEPLOY_OUTPUT=$(INITIAL_ADMIN=$KEYSTORE_ADDRESS forge script script/DeployWithStandardCreate2.s.sol:DeployWithStandardCreate2 \
         --rpc-url http://localhost:8545 \
-        --broadcast -vvv 2>&1)
+        --account $KEYSTORE_ACCOUNT \
+        --sender $KEYSTORE_ADDRESS \
+        --broadcast \
+        -vvv 2>&1)
 else
     # For local Anvil, use the first test account's private key
     # This is the well-known Anvil test private key (account 0)
-    echo -e "${YELLOW}Running deployment script...${NC}"
+    echo -e "${YELLOW}Deploying with default Anvil account...${NC}"
     DEPLOY_OUTPUT=$(forge script script/DeployWithStandardCreate2.s.sol:DeployWithStandardCreate2 \
         --rpc-url http://localhost:8545 \
         --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
@@ -392,9 +426,43 @@ export VITE_BASE_RPC_URL="http://localhost:8545"
 export GATSBY_QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS
 export GATSBY_BASE_RPC_URL="http://localhost:8545"
 
+# Debug: Verify the exported address
+echo -e "${BLUE}DEBUG: Exported QIP_REGISTRY_ADDRESS=$QIP_REGISTRY_ADDRESS${NC}"
+echo -e "${BLUE}DEBUG: Verifying contract at address...${NC}"
+CONTRACT_CODE=$(cast code $QIP_REGISTRY_ADDRESS --rpc-url http://localhost:8545 2>/dev/null | head -c 50)
+echo -e "${BLUE}DEBUG: Contract code preview: $CONTRACT_CODE...${NC}"
+
+# Verify deployer has admin role
+if [ "$DEPLOY_METHOD" = "keystore" ]; then
+    DEPLOYER_ADDRESS=$KEYSTORE_ADDRESS
+else
+    DEPLOYER_ADDRESS="0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+fi
+
+echo -e "${BLUE}DEBUG: Checking admin role for deployer: $DEPLOYER_ADDRESS${NC}"
+ADMIN_ROLE=$(cast call $REGISTRY_ADDRESS "DEFAULT_ADMIN_ROLE()(bytes32)" --rpc-url http://localhost:8545 2>/dev/null)
+HAS_ADMIN=$(cast call $REGISTRY_ADDRESS "hasRole(bytes32,address)(bool)" $ADMIN_ROLE $DEPLOYER_ADDRESS --rpc-url http://localhost:8545 2>/dev/null)
+echo -e "${BLUE}DEBUG: Deployer has admin role: $HAS_ADMIN${NC}"
+
+# No role granting needed - the deployer is already the admin with keystore method
+
 # Run initial data setup
 echo -e "\n${GREEN}3. Setting up initial test data...${NC}"
-QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS forge script script/LocalQIPTest.s.sol:LocalQIPTest --rpc-url http://localhost:8545 --broadcast --slow > /tmp/setup.log 2>&1
+echo -e "${BLUE}DEBUG: Using registry address for test data: $REGISTRY_ADDRESS${NC}"
+
+if [ "$DEPLOY_METHOD" = "keystore" ]; then
+    QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS DEPLOYER_ADDRESS=$KEYSTORE_ADDRESS \
+        forge script script/LocalQIPTest.s.sol:LocalQIPTest \
+        --rpc-url http://localhost:8545 \
+        --account $KEYSTORE_ACCOUNT \
+        --sender $KEYSTORE_ADDRESS \
+        --broadcast --slow > /tmp/setup.log 2>&1
+else
+    QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS PRIVATE_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" \
+        forge script script/LocalQIPTest.s.sol:LocalQIPTest \
+        --rpc-url http://localhost:8545 \
+        --broadcast --slow > /tmp/setup.log 2>&1
+fi
 
 if grep -q "Error" /tmp/setup.log; then
     echo -e "${YELLOW}⚠️  Some test data setup had errors (this is normal)${NC}"
@@ -439,39 +507,47 @@ if [ "$MIGRATE_QIPS" = true ]; then
         echo -e "${YELLOW}Using Pinata for IPFS uploads${NC}"
     fi
     
-    # Use the governance/deployer account private key (has editor permissions by default)
-    export PRIVATE_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+    # Set deployment credentials based on method
+    if [ "$DEPLOY_METHOD" = "keystore" ]; then
+        # With keystore, we're already authenticated
+        echo -e "${YELLOW}Using keystore account for migration: $KEYSTORE_ADDRESS${NC}"
+        # Ensure no PRIVATE_KEY pollution from previous runs or sections
+        unset PRIVATE_KEY
+        echo -e "${BLUE}DEBUG: Unset PRIVATE_KEY to prevent conflicts${NC}"
+    else
+        # Use the default Anvil account private key
+        echo -e "${YELLOW}Using default Anvil account for migration${NC}"
+        # Don't export globally - we'll pass it inline to prevent pollution
+        # export PRIVATE_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+    fi
     
-    # Choose migration method based on preference
-    echo -e "${BLUE}Migration Options:${NC}"
-    echo "1. Foundry Script (Recommended - batch processing)"
-    echo "2. TypeScript Batch Script (parallel IPFS uploads)"
-    echo "3. Original TypeScript Script (sequential)"
+    # Use Foundry script for best performance
+    echo -e "${YELLOW}Using Foundry batch migration script...${NC}"
     
-    # Default to Foundry script for best performance
-    MIGRATION_METHOD=1
+    # Debug: Show what address we're passing to migration
+    echo -e "${BLUE}DEBUG: Passing QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS to migration script${NC}"
     
-    case $MIGRATION_METHOD in
-        1)
-            echo -e "${YELLOW}Using Foundry batch migration script...${NC}"
-            # Run the Foundry migration script with FFI for file reading
+    # Run the Foundry migration script with FFI for file reading
+    # Pass environment variable explicitly
+    if [ "$DEPLOY_METHOD" = "keystore" ]; then
+        echo -e "${BLUE}DEBUG: Passing DEPLOYER_ADDRESS=$KEYSTORE_ADDRESS to migration${NC}"
+        QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS DEPLOYER_ADDRESS=$KEYSTORE_ADDRESS \
             forge script script/MigrateBatchWithFFI.s.sol \
-                --rpc-url http://localhost:8545 \
-                --broadcast \
-                --ffi \
-                -vvv
-            ;;
-        2)
-            echo -e "${YELLOW}Using TypeScript batch migration script...${NC}"
-            # Run the optimized TypeScript migration
-            bun run scripts/migrate-batch-optimized.ts
-            ;;
-        3)
-            echo -e "${YELLOW}Using original migration script...${NC}"
-            # Run the original migration script
-            bun run scripts/migrate-with-original-numbers-dev.ts
-            ;;
-    esac
+            --rpc-url http://localhost:8545 \
+            --broadcast \
+            --account $KEYSTORE_ACCOUNT \
+            --sender $KEYSTORE_ADDRESS \
+            --ffi \
+            -vvv
+    else
+        echo -e "${BLUE}DEBUG: Using inline PRIVATE_KEY for migration${NC}"
+        QIP_REGISTRY_ADDRESS=$REGISTRY_ADDRESS PRIVATE_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" \
+            forge script script/MigrateBatchWithFFI.s.sol \
+            --rpc-url http://localhost:8545 \
+            --broadcast \
+            --ffi \
+            -vvv
+    fi
     
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}✅ QIP migration complete${NC}"
@@ -541,8 +617,12 @@ echo ""
 echo -e "${BLUE}📊 Contract Information:${NC}"
 echo "- QIP Registry: $REGISTRY_ADDRESS"
 echo "- Chain ID: 8453 (Base Fork)"
-if [ -n "$IMPERSONATE_ADDRESS" ]; then
-    echo "- Deployed as: $IMPERSONATE_ADDRESS (impersonated)"
+if [ "$DEPLOY_METHOD" = "keystore" ]; then
+    echo "- Deployed by: $KEYSTORE_ADDRESS (keystore: $KEYSTORE_ACCOUNT)"
+    echo "- Admin: $KEYSTORE_ADDRESS"
+else
+    echo "- Deployed by: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 (Anvil account 0)"
+    echo "- Admin: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 fi
 echo ""
 echo -e "${BLUE}🔑 Test Accounts:${NC}"
