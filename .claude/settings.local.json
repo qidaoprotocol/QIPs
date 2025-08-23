@@ -31,7 +31,8 @@
       "Bash(timeout:*)",
       "WebFetch(domain:ai-docs.pinata.cloud)",
       "WebSearch",
-      "Bash(git submodule:*)"
+      "Bash(git submodule:*)",
+      "Bash(npx tsc:*)"
     ],
     "deny": []
   },
