@@ -25,8 +25,15 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:snapshot.mirror.xyz)",
       "Bash(lsof:*)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(bun install:*)",
+      "Bash(rg:*)",
+      "Bash(timeout:*)",
+      "WebFetch(domain:ai-docs.pinata.cloud)",
+      "WebSearch",
+      "Bash(git submodule:*)"
     ],
     "deny": []
-  }
+  },
+  "outputStyle": "Explanatory"
 }
