@@ -94,7 +94,9 @@ export function useQIPList({
                 qipNumber: Number(qip.qipNumber),
                 title: qip.title,
                 network: qip.network,
-                status: qipClient.getStatusString(qip.status),
+                status: qipClient.getStatusString(qip.status), // On-chain status (source of truth)
+                statusEnum: qip.status, // Include the enum value
+                ipfsStatus: frontmatter.status, // Status from IPFS (may differ)
                 author: frontmatter.author || qip.author,
                 implementor: qip.implementor,
                 implementationDate: implDate,

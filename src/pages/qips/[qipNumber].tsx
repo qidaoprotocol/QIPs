@@ -2,12 +2,16 @@ import React, { useState, useEffect } from "react";
 import Layout from "../../layout";
 import FrontmatterTable from "../../components/FrontmatterTable";
 import SnapshotSubmitter from "../../components/SnapshotSubmitter";
+import { StatusUpdateComponent } from "../../components/StatusUpdateComponent";
+import { StatusDiscrepancyIndicator } from "../../components/StatusDiscrepancyIndicator";
 import { useAccount } from 'wagmi';
 import { Link } from 'gatsby';
 import { useQIPData } from '../../hooks/useQIPData';
+import { useUpdateQIPStatus } from '../../hooks/useUpdateQIPStatus';
 import { config } from '../../config';
 import { ethers } from 'ethers';
 import QIPRegistryABI from '../../config/abis/QIPRegistry.json';
+import { QIPStatus } from '../../services/qipClient';
 
 interface Props {
   params?: {
@@ -27,6 +31,9 @@ const DynamicQIPPage: React.FC<Props> = ({ params, location }) => {
   const [isClient, setIsClient] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
   const [canSubmitSnapshot, setCanSubmitSnapshot] = useState(false);
+  const [isAuthor, setIsAuthor] = useState(false);
+  const [isEditor, setIsEditor] = useState(false);
+  const { updateStatus } = useUpdateQIPStatus();
   
   // Use the hook to fetch QIP data
   const { 
@@ -56,22 +63,37 @@ const DynamicQIPPage: React.FC<Props> = ({ params, location }) => {
       }
 
       // Check if user is author
-      const isAuthor = qip.author.toLowerCase() === address.toLowerCase();
+      const authorCheck = qip.author.toLowerCase() === address.toLowerCase();
+      setIsAuthor(authorCheck);
       
-      // Check if user has editor role
-      let isEditor = false;
+      // Check if user has editor or admin role
+      let editorCheck = false;
       try {
         const provider = new ethers.providers.JsonRpcProvider(config.baseRpcUrl);
         const contract = new ethers.Contract(config.qipRegistryAddress, QIPRegistryABI, provider);
+        
+        // Check for editor role
         const editorRole = await contract.EDITOR_ROLE();
-        isEditor = await contract.hasRole(editorRole, address);
+        const hasEditorRole = await contract.hasRole(editorRole, address);
+        
+        // Check for admin role (DEFAULT_ADMIN_ROLE is always 0x00 in OpenZeppelin AccessControl)
+        // This is the standard admin role that has permission to grant/revoke other roles
+        const DEFAULT_ADMIN_ROLE = '0x0000000000000000000000000000000000000000000000000000000000000000';
+        const hasAdminRole = await contract.hasRole(DEFAULT_ADMIN_ROLE, address);
+        
+        editorCheck = hasEditorRole || hasAdminRole;
+        
+        if (editorCheck) {
+          console.log(`User ${address} has ${hasAdminRole ? 'admin' : 'editor'} role`);
+        }
       } catch (error) {
-        console.error('Error checking editor role:', error);
+        console.error('Error checking roles:', error);
       }
+      setIsEditor(editorCheck);
 
-      setCanEdit(isAuthor || isEditor);
+      setCanEdit(authorCheck || editorCheck);
       // Editors can submit to snapshot even if they're not the author
-      setCanSubmitSnapshot(isAuthor || isEditor);
+      setCanSubmitSnapshot(authorCheck || editorCheck);
     };
 
     checkPermissions();
@@ -191,25 +213,45 @@ const DynamicQIPPage: React.FC<Props> = ({ params, location }) => {
                 QIP-{qip.qipNumber}: {qip.title}
               </h1>
 
-              {/* Version and IPFS info */}
+              {/* Status, Version and IPFS info */}
               <div className="text-center text-sm text-gray-600 mb-4">
-                Version {qip.version} • 
-                <a 
-                  href={`https://ipfs.io/ipfs/${qip.ipfsUrl.replace('ipfs://', '')}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-600 hover:underline ml-2"
-                >
-                  View on IPFS
-                </a>
-                {canEdit && qip.status === 'Draft' && (
-                  <Link 
-                    to={`/edit-proposal?qip=${qip.qipNumber}`}
-                    className="ml-4 text-indigo-600 hover:underline"
+                <div className="flex items-center justify-center gap-3 mb-2">
+                  <StatusUpdateComponent
+                    qipNumber={BigInt(qip.qipNumber)}
+                    currentStatus={qip.statusEnum || QIPStatus.Draft}
+                    currentIpfsStatus={qip.ipfsStatus}
+                    isAuthor={isAuthor}
+                    isEditor={isEditor}
+                    onStatusUpdate={async (newStatus) => {
+                      await updateStatus(BigInt(qip.qipNumber), newStatus);
+                      // Refresh the QIP data after update
+                      invalidateQIPs();
+                    }}
+                  />
+                  <StatusDiscrepancyIndicator
+                    onChainStatus={qip.status}
+                    ipfsStatus={qip.ipfsStatus}
+                  />
+                </div>
+                <div>
+                  Version {qip.version} • 
+                  <a 
+                    href={`https://ipfs.io/ipfs/${qip.ipfsUrl.replace('ipfs://', '')}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline ml-2"
                   >
-                    Edit Proposal
-                  </Link>
-                )}
+                    View on IPFS
+                  </a>
+                  {canEdit && qip.status === 'Draft' && (
+                    <Link 
+                      to={`/edit-proposal?qip=${qip.qipNumber}`}
+                      className="ml-4 text-indigo-600 hover:underline"
+                    >
+                      Edit Proposal
+                    </Link>
+                  )}
+                </div>
               </div>
 
               <div className="flex justify-center sm:m-0 m-3">
@@ -221,7 +263,11 @@ const DynamicQIPPage: React.FC<Props> = ({ params, location }) => {
               </div>
 
               {/* Show Snapshot submitter for eligible statuses to editors and authors */}
-              {canSubmitSnapshot && (qip.status === 'Review' || qip.status === 'Vote') && !qip.proposal && (
+              {/* Also show for recently approved QIPs that don't have a proposal yet */}
+              {canSubmitSnapshot && 
+               ((qip.status === 'Review' || qip.status === 'Vote' || 
+                (qip.status === 'Approved' && (!qip.proposal || qip.proposal === 'None'))) && 
+                (!qip.proposal || qip.proposal === 'None')) && (
                 <div className="flex flex-col w-full gap-y-3 items-left pb-10">
                   <span className="text-2xl font-bold text-black">Submit to Snapshot</span>
 

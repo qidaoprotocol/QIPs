@@ -2,11 +2,15 @@ import React, { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useAccount } from 'wagmi'
 import { useQIP } from '../hooks/useQIP'
+import { useUpdateQIPStatus } from '../hooks/useUpdateQIPStatus'
 import Layout from '../layout'
 import FrontmatterTable from '../components/FrontmatterTable'
 import SnapshotSubmitter from '../components/SnapshotSubmitter'
+import { StatusUpdateComponent } from '../components/StatusUpdateComponent'
+import { StatusDiscrepancyIndicator } from '../components/StatusDiscrepancyIndicator'
 import { ethers } from 'ethers'
 import QIPRegistryABI from '../config/abis/QIPRegistry.json'
+import { QIPStatus } from '../services/qipClient'
 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -18,6 +22,9 @@ const QIPDetail: React.FC = () => {
   const [isClient, setIsClient] = useState(false)
   const [canEdit, setCanEdit] = useState(false)
   const [canSubmitSnapshot, setCanSubmitSnapshot] = useState(false)
+  const [isAuthor, setIsAuthor] = useState(false)
+  const [isEditor, setIsEditor] = useState(false)
+  const { updateStatus } = useUpdateQIPStatus()
 
   // Extract number from QIP-XXX format
   const qipNumberParsed = qipNumber?.replace('QIP-', '') || '0'
@@ -26,7 +33,7 @@ const QIPDetail: React.FC = () => {
   const registryAddress = config.qipRegistryAddress
   const rpcUrl = config.baseRpcUrl
 
-  const { data: qipData, isLoading: loading, error } = useQIP({
+  const { data: qipData, isLoading: loading, error, refetch } = useQIP({
     registryAddress,
     qipNumber: parseInt(qipNumberParsed),
     rpcUrl,
@@ -46,22 +53,37 @@ const QIPDetail: React.FC = () => {
       }
 
       // Check if user is author
-      const isAuthor = qipData.author.toLowerCase() === address.toLowerCase()
+      const authorCheck = qipData.author.toLowerCase() === address.toLowerCase()
+      setIsAuthor(authorCheck)
       
-      // Check if user has editor role
-      let isEditor = false
+      // Check if user has editor or admin role
+      let editorCheck = false
       try {
         const provider = new ethers.providers.JsonRpcProvider(rpcUrl)
         const contract = new ethers.Contract(registryAddress, QIPRegistryABI, provider)
+        
+        // Check for editor role
         const editorRole = await contract.EDITOR_ROLE()
-        isEditor = await contract.hasRole(editorRole, address)
+        const hasEditorRole = await contract.hasRole(editorRole, address)
+        
+        // Check for admin role (DEFAULT_ADMIN_ROLE is always 0x00 in OpenZeppelin AccessControl)
+        // This is the standard admin role that has permission to grant/revoke other roles
+        const DEFAULT_ADMIN_ROLE = '0x0000000000000000000000000000000000000000000000000000000000000000'
+        const hasAdminRole = await contract.hasRole(DEFAULT_ADMIN_ROLE, address)
+        
+        editorCheck = hasEditorRole || hasAdminRole
+        
+        if (editorCheck) {
+          console.log(`User ${address} has ${hasAdminRole ? 'admin' : 'editor'} role`)
+        }
       } catch (error) {
-        console.error('Error checking editor role:', error)
+        console.error('Error checking roles:', error)
       }
+      setIsEditor(editorCheck)
 
-      setCanEdit(isAuthor || isEditor)
+      setCanEdit(authorCheck || editorCheck)
       // Editors can submit to snapshot even if they're not the author
-      setCanSubmitSnapshot(isAuthor || isEditor)
+      setCanSubmitSnapshot(authorCheck || editorCheck)
     }
 
     checkPermissions()
@@ -122,17 +144,24 @@ const QIPDetail: React.FC = () => {
           </h1>
 
           <div className="mb-6">
-            <span className={`inline-block px-3 py-1 text-sm font-semibold rounded-full ${
-              qipData.status === 'Draft' ? 'bg-gray-200 text-gray-800' :
-              qipData.status === 'Review' ? 'bg-yellow-200 text-yellow-800' :
-              qipData.status === 'Vote' ? 'bg-blue-200 text-blue-800' :
-              qipData.status === 'Approved' ? 'bg-green-200 text-green-800' :
-              qipData.status === 'Implemented' ? 'bg-purple-200 text-purple-800' :
-              qipData.status === 'Rejected' ? 'bg-red-200 text-red-800' :
-              'bg-gray-200 text-gray-800'
-            }`}>
-              {qipData.status}
-            </span>
+            <div className="flex items-center gap-3">
+              <StatusUpdateComponent
+                qipNumber={BigInt(qipData.qipNumber)}
+                currentStatus={qipData.statusEnum || QIPStatus.Draft}
+                currentIpfsStatus={qipData.ipfsStatus}
+                isAuthor={isAuthor}
+                isEditor={isEditor}
+                onStatusUpdate={async (newStatus) => {
+                  await updateStatus(BigInt(qipData.qipNumber), newStatus)
+                  // Refresh the QIP data after update
+                  refetch()
+                }}
+              />
+              <StatusDiscrepancyIndicator
+                onChainStatus={qipData.status}
+                ipfsStatus={qipData.ipfsStatus}
+              />
+            </div>
           </div>
 
           <div className="mb-8">
@@ -178,7 +207,11 @@ const QIPDetail: React.FC = () => {
           </div>
 
           {/* Snapshot submission for eligible statuses - visible to editors and authors */}
-          {canSubmitSnapshot && (qipData.status === 'Review' || qipData.status === 'Vote') && !qipData.proposal && qipData.proposal !== 'None' && (
+          {/* Also show for recently approved QIPs that don't have a proposal yet */}
+          {canSubmitSnapshot && 
+           ((qipData.status === 'Review' || qipData.status === 'Vote' || 
+            (qipData.status === 'Approved' && (!qipData.proposal || qipData.proposal === 'None'))) && 
+            (!qipData.proposal || qipData.proposal === 'None')) && (
             <div className="mt-8 border-t pt-8">
               <h2 className="text-2xl font-bold mb-4">Submit to Snapshot</h2>
               {isClient ? (

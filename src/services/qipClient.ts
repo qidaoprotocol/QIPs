@@ -12,7 +12,8 @@ const QIP_REGISTRY_ABI = [
     ],
     name: "createQIP",
     outputs: [{ name: "", type: "uint256" }],
-    type: "function"
+    type: "function",
+    stateMutability: "nonpayable"
   },
   {
     inputs: [
@@ -24,7 +25,8 @@ const QIP_REGISTRY_ABI = [
     ],
     name: "updateQIP",
     outputs: [],
-    type: "function"
+    type: "function",
+    stateMutability: "nonpayable"
   },
   {
     inputs: [
@@ -33,7 +35,8 @@ const QIP_REGISTRY_ABI = [
     ],
     name: "linkSnapshotProposal",
     outputs: [],
-    type: "function"
+    type: "function",
+    stateMutability: "nonpayable"
   },
   {
     inputs: [
@@ -79,6 +82,16 @@ const QIP_REGISTRY_ABI = [
     outputs: [{ name: "", type: "uint256[]" }],
     type: "function",
     stateMutability: "view"
+  },
+  {
+    inputs: [
+      { name: "_qipNumber", type: "uint256" },
+      { name: "_newStatus", type: "uint8" }
+    ],
+    name: "updateStatus",
+    outputs: [],
+    type: "function",
+    stateMutability: "nonpayable"
   },
   {
     anonymous: false,
@@ -739,8 +752,26 @@ ${qipData.content}`;
     qipNumber: bigint,
     newStatus: QIPStatus
   ): Promise<Hash> {
-    // This would require adding the updateStatus function to the ABI
-    // For now, throw an error indicating it's not implemented
-    throw new Error('updateQIPStatus not yet implemented in smart contract');
+    if (!walletClient?.account) throw new Error("Wallet client with account required");
+    
+    // First estimate gas
+    const estimatedGas = await this.publicClient.estimateContractGas({
+      address: this.contractAddress,
+      abi: QIP_REGISTRY_ABI,
+      functionName: 'updateStatus',
+      args: [qipNumber, newStatus],
+      account: walletClient.account
+    });
+    
+    const { request } = await this.publicClient.simulateContract({
+      address: this.contractAddress,
+      abi: QIP_REGISTRY_ABI,
+      functionName: 'updateStatus',
+      args: [qipNumber, newStatus],
+      account: walletClient.account,
+      gas: estimatedGas * 120n / 100n // Add 20% buffer
+    });
+
+    return await walletClient.writeContract(request);
   }
 }

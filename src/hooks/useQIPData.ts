@@ -10,7 +10,9 @@ export interface QIPData {
   qipNumber: number;
   title: string;
   network: string;
-  status: string;
+  status: string; // On-chain status (source of truth)
+  statusEnum: QIPStatus; // On-chain status enum value
+  ipfsStatus?: string; // Status from IPFS frontmatter (may be outdated)
   author: string;
   implementor: string;
   implementationDate: string;
@@ -115,7 +117,9 @@ export function useQIPData(options: UseQIPDataOptions = {}) {
                 qipNumber: Number(qip.qipNumber),
                 title: qip.title,
                 network: qip.network,
-                status: qipClient.getStatusString(qip.status),
+                status: qipClient.getStatusString(qip.status), // On-chain status (source of truth)
+                statusEnum: qip.status, // Include the enum value
+                ipfsStatus: frontmatter.status, // Status from IPFS (may differ)
                 author: frontmatter.author || qip.author,
                 implementor: qip.implementor,
                 implementationDate: implDate,
@@ -181,7 +185,9 @@ export function useQIPData(options: UseQIPDataOptions = {}) {
             qipNumber,
             title: qip.title,
             network: qip.network,
-            status: qipClient.getStatusString(qip.status),
+            status: qipClient.getStatusString(qip.status), // On-chain status (source of truth)
+            statusEnum: qip.status, // Include the enum value
+            ipfsStatus: frontmatter.status, // Status from IPFS (may differ)
             author: frontmatter.author || qip.author,
             implementor: qip.implementor,
             implementationDate: implDate,
