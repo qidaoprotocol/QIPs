@@ -43,14 +43,30 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Build with Vite
         env:
+          # Required secrets for blockchain and Web3 functionality
           VITE_QIP_REGISTRY_ADDRESS: ${{ secrets.QIP_REGISTRY_ADDRESS }}
           VITE_BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
           VITE_WALLETCONNECT_PROJECT_ID: ${{ secrets.WALLETCONNECT_PROJECT_ID }}
+          
+          # Required for IPFS uploads via Mai API
+          VITE_IPFS_API_URL: ${{ secrets.IPFS_API_URL }}
+          
+          # Optional: Snapshot governance space (defaults to qidao.eth)
+          VITE_SNAPSHOT_SPACE: ${{ secrets.SNAPSHOT_SPACE || 'qidao.eth' }}
+          
+          # Optional: Pinata group ID for organizing QIP uploads
+          # Uncomment if you want to group uploads:
+          # VITE_PINATA_GROUP_ID: ${{ secrets.PINATA_GROUP_ID }}
+          
+          # Optional: Custom Pinata gateway (defaults to https://gateway.pinata.cloud)
+          # Uncomment if using a custom gateway:
+          # VITE_PINATA_GATEWAY: ${{ secrets.PINATA_GATEWAY }}
+          
+          # Hardcoded production values (not sensitive)
           VITE_USE_TESTNET: 'false'
           VITE_USE_LOCAL_IPFS: 'false'
-          VITE_PINATA_GATEWAY: ${{ secrets.PINATA_GATEWAY }}
           VITE_USE_MAI_API: 'true'
-          VITE_IPFS_API_URL: ${{ secrets.MAI_API_URL }}
+          VITE_LOCAL_MODE: 'false'
         run: |
           bunx tsc --noEmit
           bun run build -- --base=/${{ github.event.repository.name }}/
