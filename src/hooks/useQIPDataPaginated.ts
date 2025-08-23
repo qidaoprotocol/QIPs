@@ -135,12 +135,153 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
         return { numbers: [], total: 0 };
       }
 
-      // Check if we already have cached data that's still fresh
+      // Check if we already have cached QIP numbers to skip enumeration
       const cachedData = queryClient.getQueryData<{ numbers: bigint[]; total: number }>(
         queryKeys.qipNumbers(registryAddress)
       );
-      if (cachedData) {
-        console.log("[useQIPDataPaginated] ✅ Using cached QIP numbers, skipping discovery phase");
+      
+      let qipNumbers: bigint[];
+      let needsDiscovery = true;
+      
+      if (cachedData && cachedData.numbers.length > 0) {
+        console.log("[useQIPDataPaginated] ✅ Found cached QIP numbers, will ensure IPFS content is fetched");
+        qipNumbers = cachedData.numbers;
+        needsDiscovery = false;
+        
+        // Ensure IPFS content is fetched for all cached QIPs
+        console.log("[useQIPDataPaginated] 🔄 Checking IPFS content for cached QIPs...");
+        
+        // Process in batches to avoid overloading
+        const BATCH_SIZE = 5;
+        for (let i = 0; i < qipNumbers.length; i += BATCH_SIZE) {
+          const batch = qipNumbers.slice(i, Math.min(i + BATCH_SIZE, qipNumbers.length));
+          
+          await Promise.all(batch.map(async (qipNumber) => {
+            try {
+              // Check if we have full QIP data cached
+              const fullQIP = queryClient.getQueryData<QIPData>(queryKeys.qip(Number(qipNumber), registryAddress));
+              if (fullQIP && fullQIP.content) {
+                // Already have everything
+                return;
+              }
+              
+              // Check if we have blockchain data
+              let blockchainData = queryClient.getQueryData<any>(
+                queryKeys.qipBlockchain(Number(qipNumber), registryAddress)
+              );
+              
+              // If no blockchain data, fetch it
+              if (!blockchainData) {
+                const qip = await qipClient.getQIP(qipNumber);
+                if (qip && qip.qipNumber > 0n) {
+                  blockchainData = qip;
+                  queryClient.setQueryData(
+                    queryKeys.qipBlockchain(Number(qipNumber), registryAddress),
+                    qip,
+                    { updatedAt: Date.now() }
+                  );
+                }
+              }
+              
+              // If we have blockchain data with IPFS URL, ensure IPFS content is fetched
+              if (blockchainData && blockchainData.ipfsUrl) {
+                const ipfsData = queryClient.getQueryData<any>(queryKeys.ipfs(blockchainData.ipfsUrl));
+                
+                // Check if we need to fetch or retry IPFS
+                const needsFetch = !ipfsData || 
+                                  (ipfsData.fetchSuccess === false && 
+                                   Date.now() - (ipfsData.lastFetchAttempt || 0) > 5 * 60 * 1000 && 
+                                   (ipfsData.retryCount || 0) < 3);
+                
+                if (needsFetch) {
+                  console.log(`[useQIPDataPaginated] 🌐 Fetching IPFS for QIP-${qipNumber}`);
+                  try {
+                    const content = await ipfsService.fetchQIP(blockchainData.ipfsUrl);
+                    const parsed = ipfsService.parseQIPMarkdown(content);
+                    const ipfsContent = { 
+                      raw: content, 
+                      ...parsed, 
+                      cid: blockchainData.ipfsUrl,
+                      lastFetchAttempt: Date.now(),
+                      fetchSuccess: true
+                    };
+                    
+                    queryClient.setQueryData(queryKeys.ipfs(blockchainData.ipfsUrl), ipfsContent, {
+                      updatedAt: Date.now(),
+                    });
+                    
+                    // Also assemble and cache full QIP data
+                    const { frontmatter, content: body } = parsed;
+                    const implDate = blockchainData.implementationDate > 0n 
+                      ? new Date(Number(blockchainData.implementationDate) * 1000).toISOString().split('T')[0]
+                      : 'None';
+                    
+                    const fullQIPData: QIPData = {
+                      qipNumber: Number(blockchainData.qipNumber),
+                      title: blockchainData.title,
+                      network: blockchainData.network,
+                      status: qipClient.getStatusString(blockchainData.status),
+                      statusEnum: blockchainData.status,
+                      ipfsStatus: frontmatter?.status,
+                      author: frontmatter?.author || blockchainData.author,
+                      implementor: blockchainData.implementor,
+                      implementationDate: implDate,
+                      proposal: (blockchainData.snapshotProposalId && 
+                                blockchainData.snapshotProposalId !== 'TBU' && 
+                                blockchainData.snapshotProposalId !== 'tbu' &&
+                                blockchainData.snapshotProposalId !== 'None') 
+                                ? blockchainData.snapshotProposalId 
+                                : 'None',
+                      created: frontmatter?.created || new Date(Number(blockchainData.createdAt) * 1000).toISOString().split('T')[0],
+                      content: body || '',
+                      ipfsUrl: blockchainData.ipfsUrl,
+                      contentHash: blockchainData.contentHash,
+                      version: Number(blockchainData.version),
+                      source: 'blockchain' as const,
+                      lastUpdated: Date.now()
+                    };
+                    
+                    queryClient.setQueryData(
+                      queryKeys.qip(Number(blockchainData.qipNumber), registryAddress),
+                      fullQIPData,
+                      { updatedAt: Date.now() }
+                    );
+                    
+                    console.log(`[useQIPDataPaginated] ✅ IPFS cached for QIP-${qipNumber}`);
+                  } catch (error) {
+                    console.warn(`[useQIPDataPaginated] ⚠️ IPFS fetch failed for QIP-${qipNumber}:`, error);
+                    
+                    // Cache failure for retry
+                    const previousRetryCount = ipfsData?.retryCount || 0;
+                    const failedData = {
+                      error: error.message || 'Unknown error',
+                      lastFetchAttempt: Date.now(),
+                      fetchSuccess: false,
+                      retryCount: previousRetryCount + 1,
+                      cid: blockchainData.ipfsUrl
+                    };
+                    
+                    queryClient.setQueryData(queryKeys.ipfs(blockchainData.ipfsUrl), failedData, {
+                      updatedAt: Date.now(),
+                      staleTime: 5 * 60 * 1000, // 5 minutes for failed fetches
+                    });
+                  }
+                }
+              }
+            } catch (error) {
+              console.error(`[useQIPDataPaginated] Error processing QIP-${qipNumber}:`, error);
+            }
+          }));
+          
+          // Small delay between batches to avoid rate limiting
+          if (i + BATCH_SIZE < qipNumbers.length) {
+            await new Promise(resolve => setTimeout(resolve, 200));
+          }
+        }
+        
+        console.log("[useQIPDataPaginated] ✅ IPFS content check complete");
+        
+        // Return cached numbers after ensuring IPFS is fetched
         return cachedData;
       }
 
@@ -240,7 +381,9 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
                     
                     // Now assemble and cache the full QIP data
                     if (ipfsData) {
-                      const { frontmatter, content } = ipfsData;
+                      // Handle both 'body' and 'content' field names
+                      const { frontmatter } = ipfsData;
+                      const content = ipfsData.content || ipfsData.body || '';
                       const implDate = qip.implementationDate > 0n 
                         ? new Date(Number(qip.implementationDate) * 1000).toISOString().split('T')[0]
                         : 'None';
@@ -422,11 +565,25 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
           .map(async (qip) => {
             const cid = qip.ipfsUrl.startsWith("ipfs://") ? qip.ipfsUrl.slice(7) : qip.ipfsUrl;
             
-            // Check cache first
+            // Check cache first - but retry failed fetches after timeout
             const cached = queryClient.getQueryData(queryKeys.ipfs(qip.ipfsUrl));
             if (cached) {
-              console.log(`[useQIPDataPaginated]    │  ├─ ✅ IPFS cache hit: QIP-${qip.qipNumber}`);
-              return { qip, ipfsContent: cached };
+              // Check if this is a failed fetch that should be retried
+              if (cached.fetchSuccess === false) {
+                const timeSinceLastAttempt = Date.now() - (cached.lastFetchAttempt || 0);
+                const shouldRetry = timeSinceLastAttempt > (5 * 60 * 1000); // 5 minutes
+                
+                if (shouldRetry && (cached.retryCount || 0) < 3) {
+                  console.log(`[useQIPDataPaginated]    │  ├─ 🔄 Retrying failed IPFS fetch: QIP-${qip.qipNumber} (attempt ${(cached.retryCount || 0) + 1})`);
+                  // Don't return cached - fall through to fetch again
+                } else {
+                  console.log(`[useQIPDataPaginated]    │  ├─ ❌ IPFS permanently failed: QIP-${qip.qipNumber} (${cached.retryCount || 1} attempts)`);
+                  return { qip, ipfsContent: null };
+                }
+              } else {
+                console.log(`[useQIPDataPaginated]    │  ├─ ✅ IPFS cache hit: QIP-${qip.qipNumber}`);
+                return { qip, ipfsContent: cached };
+              }
             }
             
             // Fetch if not cached
@@ -434,9 +591,15 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
               console.log(`[useQIPDataPaginated]    │  ├─ 🌐 Fetching IPFS: QIP-${qip.qipNumber}`);
               const content = await ipfsService.fetchQIP(qip.ipfsUrl);
               const parsed = ipfsService.parseQIPMarkdown(content);
-              const ipfsData = { raw: content, ...parsed, cid: qip.ipfsUrl };
+              const ipfsData = { 
+                raw: content, 
+                ...parsed, 
+                cid: qip.ipfsUrl,
+                lastFetchAttempt: Date.now(),
+                fetchSuccess: true
+              };
               
-              // Cache the IPFS content
+              // Cache the IPFS content with success indicator
               queryClient.setQueryData(queryKeys.ipfs(qip.ipfsUrl), ipfsData, {
                 updatedAt: Date.now(),
                 staleTime: Infinity,
@@ -445,6 +608,23 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
               return { qip, ipfsContent: ipfsData };
             } catch (error) {
               console.warn(`[useQIPDataPaginated]    │  ├─ ⚠️ IPFS fetch failed: QIP-${qip.qipNumber}`, error);
+              
+              // Cache failure information to track retry attempts
+              const previousRetryCount = cached?.retryCount || 0;
+              const failedData = {
+                error: error.message || 'Unknown error',
+                lastFetchAttempt: Date.now(),
+                fetchSuccess: false,
+                retryCount: previousRetryCount + 1,
+                cid: qip.ipfsUrl
+              };
+              
+              // Cache the failure with a shorter stale time to allow retries
+              queryClient.setQueryData(queryKeys.ipfs(qip.ipfsUrl), failedData, {
+                updatedAt: Date.now(),
+                staleTime: 5 * 60 * 1000, // 5 minutes for failed fetches
+              });
+              
               return { qip, ipfsContent: null };
             }
           });
@@ -472,7 +652,10 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
           }
           
           try {
-            const { frontmatter, body: content } = ipfsContent;
+            // Handle both 'body' and 'content' field names for consistency
+            // Different parts of the app use different field names
+            const { frontmatter } = ipfsContent;
+            const content = ipfsContent.body || ipfsContent.content || '';
 
             const implDate = qip.implementationDate > 0n 
               ? new Date(Number(qip.implementationDate) * 1000).toISOString().split("T")[0] 

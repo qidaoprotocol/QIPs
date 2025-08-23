@@ -218,6 +218,13 @@ export class QIPClient {
 
 
   /**
+   * Get the load-balanced public client for external use
+   */
+  public getPublicClient(): PublicClient {
+    return this.publicClient;
+  }
+
+  /**
    * Check if running in local development
    */
   private isLocalDevelopment(): boolean {

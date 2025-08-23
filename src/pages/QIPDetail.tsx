@@ -8,9 +8,9 @@ import FrontmatterTable from '../components/FrontmatterTable'
 import SnapshotSubmitter from '../components/SnapshotSubmitter'
 import { StatusUpdateComponent } from '../components/StatusUpdateComponent'
 import { StatusDiscrepancyIndicator } from '../components/StatusDiscrepancyIndicator'
-import { ethers } from 'ethers'
 import QIPRegistryABI from '../config/abis/QIPRegistry.json'
-import { QIPStatus } from '../services/qipClient'
+import { QIPStatus, QIPClient } from '../services/qipClient'
+import { useMemo } from 'react'
 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -24,6 +24,9 @@ const QIPDetail: React.FC = () => {
   const [canSubmitSnapshot, setCanSubmitSnapshot] = useState(false)
   const [isAuthor, setIsAuthor] = useState(false)
   const [isEditor, setIsEditor] = useState(false)
+  
+  // Cache for role checks to avoid repeated contract calls
+  const [roleCache] = useState<Map<string, boolean>>(new Map())
   const { updateStatus } = useUpdateQIPStatus()
 
   // Extract number from QIP-XXX format
@@ -33,6 +36,7 @@ const QIPDetail: React.FC = () => {
   const registryAddress = config.qipRegistryAddress
   const rpcUrl = config.baseRpcUrl
 
+
   const { data: qipData, isLoading: loading, error, refetch } = useQIP({
     registryAddress,
     qipNumber: parseInt(qipNumberParsed),
@@ -40,13 +44,22 @@ const QIPDetail: React.FC = () => {
     enabled: !!registryAddress && !!qipNumber
   })
 
+  // Create a memoized QIPClient instance to avoid recreating it
+  const qipClient = useMemo(() => {
+    if (!registryAddress) return null
+    return new QIPClient(registryAddress, rpcUrl, false)
+  }, [registryAddress, rpcUrl])
+
   useEffect(() => {
     setIsClient(true)
   }, [])
 
   useEffect(() => {
+    // Debounce timer to prevent rapid re-checks
+    let timeoutId: NodeJS.Timeout
+    
     const checkPermissions = async () => {
-      if (!address || !qipData) {
+      if (!address || !qipData || !qipClient) {
         setCanEdit(false)
         setCanSubmitSnapshot(false)
         return
@@ -56,28 +69,54 @@ const QIPDetail: React.FC = () => {
       const authorCheck = qipData.author.toLowerCase() === address.toLowerCase()
       setIsAuthor(authorCheck)
       
-      // Check if user has editor or admin role
+      // Check if user has editor or admin role using the load-balanced client
       let editorCheck = false
-      try {
-        const provider = new ethers.providers.JsonRpcProvider(rpcUrl)
-        const contract = new ethers.Contract(registryAddress, QIPRegistryABI, provider)
-        
-        // Check for editor role
-        const editorRole = await contract.EDITOR_ROLE()
-        const hasEditorRole = await contract.hasRole(editorRole, address)
-        
-        // Check for admin role (DEFAULT_ADMIN_ROLE is always 0x00 in OpenZeppelin AccessControl)
-        // This is the standard admin role that has permission to grant/revoke other roles
-        const DEFAULT_ADMIN_ROLE = '0x0000000000000000000000000000000000000000000000000000000000000000'
-        const hasAdminRole = await contract.hasRole(DEFAULT_ADMIN_ROLE, address)
-        
-        editorCheck = hasEditorRole || hasAdminRole
-        
-        if (editorCheck) {
-          console.log(`User ${address} has ${hasAdminRole ? 'admin' : 'editor'} role`)
+      
+      // Check cache first
+      const cacheKey = `${address}-roles`
+      if (roleCache.has(cacheKey)) {
+        editorCheck = roleCache.get(cacheKey) || false
+      } else {
+        try {
+          // Use the QIPClient's public client which has load balancing
+          const publicClient = qipClient.getPublicClient()
+          
+          // Batch both role checks together to reduce RPC calls
+          const DEFAULT_ADMIN_ROLE = '0x0000000000000000000000000000000000000000000000000000000000000000'
+          
+          // Get EDITOR_ROLE constant first
+          const editorRoleResult = await publicClient.readContract({
+            address: registryAddress,
+            abi: QIPRegistryABI,
+            functionName: 'EDITOR_ROLE'
+          })
+          
+          // Then batch the hasRole checks
+          const [hasEditorRole, hasAdminRole] = await Promise.all([
+            publicClient.readContract({
+              address: registryAddress,
+              abi: QIPRegistryABI,
+              functionName: 'hasRole',
+              args: [editorRoleResult, address]
+            }),
+            publicClient.readContract({
+              address: registryAddress,
+              abi: QIPRegistryABI,
+              functionName: 'hasRole',
+              args: [DEFAULT_ADMIN_ROLE, address]
+            })
+          ])
+          
+          editorCheck = hasEditorRole || hasAdminRole
+          // Cache the result
+          roleCache.set(cacheKey, editorCheck)
+          
+          if (editorCheck) {
+            console.log(`User ${address} has ${hasAdminRole ? 'admin' : 'editor'} role`)
+          }
+        } catch (error) {
+          console.error('Error checking roles:', error)
         }
-      } catch (error) {
-        console.error('Error checking roles:', error)
       }
       setIsEditor(editorCheck)
 
@@ -86,8 +125,11 @@ const QIPDetail: React.FC = () => {
       setCanSubmitSnapshot(authorCheck || editorCheck)
     }
 
-    checkPermissions()
-  }, [address, qipData, rpcUrl, registryAddress])
+    // Debounce the check to avoid rapid re-execution
+    timeoutId = setTimeout(checkPermissions, 300)
+    
+    return () => clearTimeout(timeoutId)
+  }, [address, qipData, qipClient, registryAddress])
 
   if (loading) {
     return (

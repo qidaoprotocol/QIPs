@@ -110,7 +110,6 @@ export const IPFS_GATEWAYS = [
   "https://ipfs.io",
   "https://dweb.link",
   "https://nftstorage.link",
-  "https://cloudflare-ipfs.com",
   "https://gateway.ipfs.io",
 ];
 
@@ -789,7 +788,8 @@ ${qipData.content}`;
     const cid = cidOrUrl.startsWith("ipfs://") ? cidOrUrl.slice(7) : cidOrUrl;
 
     const rawContent = await this.provider.fetch(cid);
-    return this.processIPFSContent(rawContent, cid);
+    const processed = this.processIPFSContent(rawContent, cid);
+    return processed;
   }
 
   /**
@@ -945,6 +945,7 @@ ${qipData.content}`;
     frontmatter: Record<string, any>;
     content: string;
   } {
+    
     // Ensure we have a string to work with
     if (typeof markdown !== "string") {
       console.error("parseQIPMarkdown received non-string:", typeof markdown, markdown);
@@ -993,6 +994,7 @@ ${qipData.content}`;
 
     const yamlContent = match[1];
     const content = match[2].trim();
+    
 
     // Simple YAML parsing
     const frontmatter: Record<string, any> = {};

@@ -1,3 +1,4 @@
+import React from 'react';
 import { useQuery, UseQueryOptions, useQueryClient } from '@tanstack/react-query';
 import { QIPClient } from '../services/qipClient';
 import { getIPFSService } from '../services/getIPFSService';
@@ -30,6 +31,7 @@ export function useQIP({
 
   const queryClient = useQueryClient();
 
+
   return useQuery<QIPData | null>({
     queryKey: queryKeys.qip(qipNumber, registryAddress),
     queryFn: async () => {
@@ -39,8 +41,37 @@ export function useQIP({
         // FIRST: Check if we already have the full QIP data cached from the list page
         const cachedFullQIP = queryClient.getQueryData<QIPData>(queryKeys.qip(qipNumber, registryAddress));
         if (cachedFullQIP) {
-          console.log(`[useQIP] ✅ Using fully cached QIP data for QIP-${qipNumber} (no fetch needed!)`);
-          return cachedFullQIP;
+          console.log(`[useQIP] ✅ Using fully cached QIP data for QIP-${qipNumber} (no fetch needed!)`, {
+            hasContent: !!cachedFullQIP.content,
+            contentLength: cachedFullQIP.content?.length,
+            contentPreview: cachedFullQIP.content?.substring(0, 100)
+          });
+          
+          // Also ensure IPFS cache is set (in case it's missing)
+          // This makes the cache more resilient to re-renders
+          if (cachedFullQIP.ipfsUrl && cachedFullQIP.content) {
+            const ipfsCacheKey = queryKeys.ipfs(cachedFullQIP.ipfsUrl);
+            const existingIpfsCache = queryClient.getQueryData(ipfsCacheKey);
+            if (!existingIpfsCache) {
+              queryClient.setQueryData(ipfsCacheKey, {
+                raw: cachedFullQIP.content, // Store content as raw for compatibility
+                frontmatter: {
+                  qip: cachedFullQIP.qipNumber,
+                  title: cachedFullQIP.title,
+                  status: cachedFullQIP.ipfsStatus || cachedFullQIP.status,
+                  author: cachedFullQIP.author,
+                  created: cachedFullQIP.created
+                },
+                body: cachedFullQIP.content,
+                content: cachedFullQIP.content, // Include both for compatibility
+                cid: cachedFullQIP.ipfsUrl
+              }, { updatedAt: Date.now() });
+            }
+          }
+          
+          // Return a shallow copy to prevent mutation of cached data
+          // This is critical to prevent React StrictMode or other components from corrupting the cache
+          return { ...cachedFullQIP };
         }
 
         console.log(`[useQIP] 🔍 No full cache for QIP-${qipNumber}, fetching...`);
@@ -76,15 +107,38 @@ export function useQIP({
         let ipfsContent, frontmatter, content;
         
         if (cachedIPFS) {
-          console.log(`[useQIP] ✓ Using cached IPFS content for QIP-${qipNumber}`);
-          ipfsContent = cachedIPFS.raw || cachedIPFS;
-          const parsed = ipfsService.parseQIPMarkdown(ipfsContent);
-          frontmatter = parsed.frontmatter;
-          content = parsed.content;
+          console.log(`[useQIP] ✓ Using cached IPFS content for QIP-${qipNumber}`, {
+            cacheKeys: Object.keys(cachedIPFS),
+            hasRaw: !!cachedIPFS.raw,
+            hasBody: !!cachedIPFS.body,
+            hasFrontmatter: !!cachedIPFS.frontmatter,
+            rawLength: cachedIPFS.raw?.length,
+            bodyLength: cachedIPFS.body?.length
+          });
+          
+          // If we have already parsed content (from prefetch), use it directly
+          // Check if this is a structured cache entry (has 'raw' field) with parsed data
+          // Note: useQIPDataPaginated uses 'content' field, ProposalListItem uses 'body' field
+          if (cachedIPFS.raw && cachedIPFS.frontmatter && ('body' in cachedIPFS || 'content' in cachedIPFS)) {
+            console.log(`[useQIP] ✅ Using pre-parsed cached content for QIP-${qipNumber}`);
+            frontmatter = cachedIPFS.frontmatter;
+            // Handle both field names and ensure content is never undefined
+            content = cachedIPFS.body || cachedIPFS.content || '';
+          } else {
+            // Otherwise, parse the raw content
+            // If cachedIPFS.raw exists, use it; otherwise cachedIPFS itself is the raw content
+            ipfsContent = cachedIPFS.raw || cachedIPFS;
+            const parsed = ipfsService.parseQIPMarkdown(ipfsContent);
+            
+            frontmatter = parsed.frontmatter;
+            content = parsed.content;
+          }
+          
         } else {
           console.log(`[useQIP] 🌐 Fetching IPFS content for QIP-${qipNumber} from ${qip.ipfsUrl}`);
           ipfsContent = await ipfsService.fetchQIP(qip.ipfsUrl);
           const parsed = ipfsService.parseQIPMarkdown(ipfsContent);
+          
           frontmatter = parsed.frontmatter;
           content = parsed.content;
           
@@ -122,7 +176,8 @@ export function useQIP({
                     ? qip.snapshotProposalId 
                     : 'None',
           created: frontmatter.created || new Date(Number(qip.createdAt) * 1000).toISOString().split('T')[0],
-          content,
+          // Ensure content is never undefined - use empty string as fallback
+          content: content || '',
           ipfsUrl: qip.ipfsUrl,
           contentHash: qip.contentHash,
           version: Number(qip.version),
@@ -130,6 +185,7 @@ export function useQIP({
           lastUpdated: Date.now()
         };
 
+        
         console.log(`[useQIP] ✅ Assembled full QIP-${qipNumber} data`);
         return fullQIPData;
       } catch (error) {

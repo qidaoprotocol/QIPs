@@ -27,10 +27,19 @@ const ProposalListItem = (props: any) => {
     const queryClient = useQueryClient();
     const ipfsService = getIPFSService();
     
+    // Track ongoing prefetches to avoid duplicates
+    const prefetchingRef = React.useRef<Set<number>>(new Set());
+    
     // Prefetch QIP data on hover
     const handleMouseEnter = async (qipNumber: number) => {
         const registryAddress = config.qipRegistryAddress;
         if (!registryAddress) return;
+        
+        // Avoid duplicate prefetches
+        if (prefetchingRef.current.has(qipNumber)) {
+            console.log('[ProposalListItem] Already prefetching QIP:', qipNumber);
+            return;
+        }
         
         // Check if already cached
         const cacheKey = ['qip', qipNumber, registryAddress];
@@ -38,59 +47,69 @@ const ProposalListItem = (props: any) => {
         
         if (!cached) {
             console.debug(`[ProposalListItem] Prefetching QIP ${qipNumber} on hover`);
+            prefetchingRef.current.add(qipNumber);
             
             // Prefetch the QIP data
-            queryClient.prefetchQuery({
-                queryKey: cacheKey,
-                queryFn: async () => {
-                    const qipClient = new QIPClient(registryAddress, config.baseRpcUrl, false);
-                    const qip = await qipClient.getQIP(BigInt(qipNumber));
-                    
-                    if (!qip || qip.qipNumber === 0n) return null;
-                    
-                    // Also prefetch IPFS content
-                    const ipfsContent = await ipfsService.fetchQIP(qip.ipfsUrl);
-                    const { frontmatter, content } = ipfsService.parseQIPMarkdown(ipfsContent);
-                    
-                    // Cache IPFS separately
-                    queryClient.setQueryData(['ipfs', qip.ipfsUrl], {
-                        raw: ipfsContent,
-                        frontmatter,
-                        body: content,
-                        cid: qip.ipfsUrl,
-                    });
-                    
-                    const implDate = qip.implementationDate > 0n 
-                        ? new Date(Number(qip.implementationDate) * 1000).toISOString().split('T')[0]
-                        : 'None';
-                    
-                    return {
-                        qipNumber,
-                        title: qip.title,
-                        network: qip.network,
-                        status: qipClient.getStatusString(qip.status),
-                        author: frontmatter.author || qip.author,
-                        implementor: qip.implementor,
-                        implementationDate: implDate,
-                        // Filter out TBU and other placeholders
-                        proposal: (qip.snapshotProposalId && 
-                                  qip.snapshotProposalId !== 'TBU' && 
-                                  qip.snapshotProposalId !== 'tbu' &&
-                                  qip.snapshotProposalId !== 'None') 
-                                  ? qip.snapshotProposalId 
-                                  : 'None',
-                        created: frontmatter.created || new Date(Number(qip.createdAt) * 1000).toISOString().split('T')[0],
-                        content,
-                        ipfsUrl: qip.ipfsUrl,
-                        contentHash: qip.contentHash,
-                        version: Number(qip.version),
-                        source: 'blockchain' as const,
-                        lastUpdated: Date.now()
-                    };
-                },
-                staleTime: CACHE_TIMES.STALE_TIME.QIP_DETAIL,
-                gcTime: CACHE_TIMES.GC_TIME.QIP_DETAIL,
-            });
+            try {
+                await queryClient.prefetchQuery({
+                    queryKey: cacheKey,
+                    queryFn: async () => {
+                        const qipClient = new QIPClient(registryAddress, config.baseRpcUrl, false);
+                        const qip = await qipClient.getQIP(BigInt(qipNumber));
+                        
+                        if (!qip || qip.qipNumber === 0n) return null;
+                        
+                        // Also prefetch IPFS content
+                        const ipfsContent = await ipfsService.fetchQIP(qip.ipfsUrl);
+                        const { frontmatter, content } = ipfsService.parseQIPMarkdown(ipfsContent);
+                        
+                        // Cache IPFS separately
+                        queryClient.setQueryData(['ipfs', qip.ipfsUrl], {
+                            raw: ipfsContent,
+                            frontmatter,
+                            body: content,
+                            cid: qip.ipfsUrl,
+                        });
+                        
+                        const implDate = qip.implementationDate > 0n 
+                            ? new Date(Number(qip.implementationDate) * 1000).toISOString().split('T')[0]
+                            : 'None';
+                        
+                        return {
+                            qipNumber,
+                            title: qip.title,
+                            network: qip.network,
+                            status: qipClient.getStatusString(qip.status),
+                            author: frontmatter.author || qip.author,
+                            implementor: qip.implementor,
+                            implementationDate: implDate,
+                            // Filter out TBU and other placeholders
+                            proposal: (qip.snapshotProposalId && 
+                                      qip.snapshotProposalId !== 'TBU' && 
+                                      qip.snapshotProposalId !== 'tbu' &&
+                                      qip.snapshotProposalId !== 'None') 
+                                      ? qip.snapshotProposalId 
+                                      : 'None',
+                            created: frontmatter.created || new Date(Number(qip.createdAt) * 1000).toISOString().split('T')[0],
+                            content,
+                            ipfsUrl: qip.ipfsUrl,
+                            contentHash: qip.contentHash,
+                            version: Number(qip.version),
+                            source: 'blockchain' as const,
+                            lastUpdated: Date.now()
+                        };
+                    },
+                    staleTime: CACHE_TIMES.STALE_TIME.QIP_DETAIL,
+                    gcTime: CACHE_TIMES.GC_TIME.QIP_DETAIL,
+                });
+            } catch (error) {
+                console.error('[ProposalListItem] Prefetch error for QIP:', qipNumber, error);
+            } finally {
+                // Remove from prefetching set
+                prefetchingRef.current.delete(qipNumber);
+            }
+        } else {
+            console.log('[ProposalListItem] QIP already cached:', qipNumber);
         }
     };
 

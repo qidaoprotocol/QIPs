@@ -12,6 +12,7 @@ import TemplatesPage from './pages/TemplatesPage'
 import EditProposal from "./pages/EditProposal";
 
 function App() {
+
   return (
     <Web3Provider>
       <Router>
