@@ -269,7 +269,14 @@ const DynamicQIPPage: React.FC<Props> = ({ params, location }) => {
                 (qip.status === 'Approved' && (!qip.proposal || qip.proposal === 'None'))) && 
                 (!qip.proposal || qip.proposal === 'None')) && (
                 <div className="flex flex-col w-full gap-y-3 items-left pb-10">
-                  <span className="text-2xl font-bold text-black">Submit to Snapshot</span>
+                  <span className="text-2xl font-bold text-black">
+                    Submit to Snapshot
+                    {config.snapshotSpace !== 'qidao.eth' && (
+                      <span className="text-base font-normal text-blue-600 ml-2">
+                        (Space: {config.snapshotSpace})
+                      </span>
+                    )}
+                  </span>
 
                   {isClient ? (
                     <SnapshotSubmitter 

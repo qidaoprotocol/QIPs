@@ -9,8 +9,11 @@ export function getSnapshotClient(hub: string) {
 // Create a proposal using ethers.Signer
 export async function createProposal(signer: Signer, hub: string, options: Proposal) {
   const client = getSnapshotClient(hub);
+  // The SnapshotSubmitter component now always provides Ethereum mainnet blocks
+  // This fallback should rarely be used
   if (!options.snapshot) {
-    options.snapshot = (await signer.provider?.getBlockNumber()) || 0;
+    console.warn('No snapshot block provided, this should not happen');
+    options.snapshot = 0;
   }
   const proposal: Proposal = {
     space: options.space,

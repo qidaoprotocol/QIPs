@@ -213,7 +213,14 @@ const QIPDetail: React.FC = () => {
             (qipData.status === 'Approved' && (!qipData.proposal || qipData.proposal === 'None'))) && 
             (!qipData.proposal || qipData.proposal === 'None')) && (
             <div className="mt-8 border-t pt-8">
-              <h2 className="text-2xl font-bold mb-4">Submit to Snapshot</h2>
+              <h2 className="text-2xl font-bold mb-4">
+                Submit to Snapshot
+                {config.snapshotSpace !== 'qidao.eth' && (
+                  <span className="text-base font-normal text-blue-600 ml-2">
+                    (Space: {config.snapshotSpace})
+                  </span>
+                )}
+              </h2>
               {isClient ? (
                 <SnapshotSubmitter 
                   frontmatter={frontmatter} 

@@ -19,6 +19,11 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({ frontmatter, html
   const [highestQip, setHighestQip] = useState<number | null>(null);
 
   const SNAPSHOT_SPACE = config.snapshotSpace;
+  const isDefaultSpace = SNAPSHOT_SPACE === 'qidao.eth';
+  
+  // Conditional validation based on space
+  const requiresTokenBalance = isDefaultSpace;
+  const requiresQipValidation = isDefaultSpace;
 
   const cleanMarkdown = (rawMarkdown: string) => {
     // Remove frontmatter from the beginning of the markdown
@@ -46,22 +51,22 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({ frontmatter, html
   const ERC20_ABI = ["function balanceOf(address owner) view returns (uint256)", "function decimals() view returns (uint8)"];
 
   const fetchTokenBalance = async () => {
-    if (!signer) return 0;
+    if (!signer || !requiresTokenBalance) return REQUIRED_BALANCE; // Return valid balance for non-default spaces
     const tokenContract = new ethers.Contract(TOKEN_CONTRACT_ADDRESS, ERC20_ABI, signer);
     const address = await signer.getAddress();
     const [balance, decimals] = await Promise.all([tokenContract.balanceOf(address), tokenContract.decimals()]);
     return Number(ethers.utils.formatUnits(balance, decimals));
   };
 
-  const { data: tokenBalance = 0, isLoading: checkingBalance } = useQuery({
-    queryKey: ["tokenBalance", TOKEN_CONTRACT_ADDRESS, signer ? "connected" : "disconnected"],
+  const { data: tokenBalance = requiresTokenBalance ? 0 : REQUIRED_BALANCE, isLoading: checkingBalance } = useQuery({
+    queryKey: ["tokenBalance", TOKEN_CONTRACT_ADDRESS, signer ? "connected" : "disconnected", requiresTokenBalance],
     queryFn: fetchTokenBalance,
     enabled: !!signer,
     staleTime: 30000,
     refetchInterval: 60000,
   });
 
-  const isQipValid = highestQip !== null && frontmatter.qip === highestQip + 1;
+  const isQipValid = requiresQipValidation ? (highestQip !== null && frontmatter.qip === highestQip + 1) : true;
   const space = SNAPSHOT_SPACE;
 
   const handleSubmit = async () => {
@@ -69,13 +74,18 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({ frontmatter, html
       setStatus("Please connect your wallet first.");
       return;
     }
-    if (!isQipValid) {
+    if (requiresQipValidation && !isQipValid) {
       setStatus(`Error: Invalid QIP number. The next QIP should be #${highestQip === null ? "..." : highestQip + 1}.`);
       return;
     }
     setLoading(true);
     setStatus(null);
     try {
+      // Always use Ethereum mainnet blocks for all Snapshot proposals
+      const ethProvider = new ethers.providers.JsonRpcProvider('https://eth.llamarpc.com');
+      const snapshotBlock = await ethProvider.getBlockNumber();
+      console.log('Using Ethereum mainnet block for snapshot:', snapshotBlock);
+      
       // Calculate timestamps right before submission
       const now = Math.floor(Date.now() / 1000);
       const startOffset = 86400; // Exactly 24 hours
@@ -89,7 +99,7 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({ frontmatter, html
         choices: ["For", "Against", "Abstain"],
         start: now + startOffset,
         end: now + endOffset,
-        snapshot: 0,
+        snapshot: snapshotBlock, // Use the correct block number
         discussion: "",
         plugins: JSON.stringify({}),
         app: "snapshot-v2",
@@ -139,7 +149,10 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({ frontmatter, html
             {status}
           </p>
         )}
-        {signer && tokenBalance >= REQUIRED_BALANCE && (
+        {!isDefaultSpace && (
+          <p className="mt-1 text-xs text-blue-600">Submitting to space: {SNAPSHOT_SPACE}</p>
+        )}
+        {signer && requiresTokenBalance && tokenBalance >= REQUIRED_BALANCE && (
           <p className="mt-1 text-xs text-gray-600">Token balance: {tokenBalance.toLocaleString()} (✓ meets requirement)</p>
         )}
       </div>
@@ -147,23 +160,25 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({ frontmatter, html
       <div className="flex justify-center sm:m-0 m-3">
         <button
           className={`m-auto w-fit px-6 py-3 rounded-lg font-medium transition-colors ${
-            !signer || tokenBalance < REQUIRED_BALANCE || loading || checkingBalance || !isQipValid || loadingProposals
+            !signer || (requiresTokenBalance && tokenBalance < REQUIRED_BALANCE) || loading || (requiresTokenBalance && checkingBalance) || !isQipValid || (requiresQipValidation && loadingProposals)
               ? "bg-gray-400 cursor-not-allowed"
               : "bg-blue-600 hover:bg-blue-700"
           } text-white`}
           onClick={handleSubmit}
-          disabled={!signer || tokenBalance < REQUIRED_BALANCE || loading || checkingBalance || !isQipValid || loadingProposals}
+          disabled={!signer || (requiresTokenBalance && tokenBalance < REQUIRED_BALANCE) || loading || (requiresTokenBalance && checkingBalance) || !isQipValid || (requiresQipValidation && loadingProposals)}
         >
           {loading
             ? "Submitting..."
-            : checkingBalance || loadingProposals
+            : (requiresTokenBalance && checkingBalance) || (requiresQipValidation && loadingProposals)
             ? "Checking prerequisites..."
             : !signer
             ? "Connect Wallet"
-            : !isQipValid
+            : requiresQipValidation && !isQipValid
             ? `Invalid QIP Number (currently ${frontmatter.qip}, next is ${highestQip === null ? "..." : highestQip + 1})`
-            : tokenBalance < REQUIRED_BALANCE
+            : requiresTokenBalance && tokenBalance < REQUIRED_BALANCE
             ? `Insufficient Balance (${tokenBalance.toLocaleString()} / ${REQUIRED_BALANCE.toLocaleString()} required)`
+            : !isDefaultSpace
+            ? `Submit to ${SNAPSHOT_SPACE}`
             : "Submit to Snapshot"}
         </button>
       </div>
