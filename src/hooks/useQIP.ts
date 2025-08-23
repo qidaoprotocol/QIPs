@@ -5,6 +5,7 @@ import { QIPData } from './useQIPData';
 import { config } from '../config/env';
 import { CACHE_TIMES } from '../config/queryClient';
 import { useCachedIPFS } from './useCachedIPFS';
+import { queryKeys } from '../utils/queryKeys';
 
 interface UseQIPOptions {
   registryAddress: `0x${string}`;
@@ -30,47 +31,58 @@ export function useQIP({
   const queryClient = useQueryClient();
 
   return useQuery<QIPData | null>({
-    queryKey: ['qip', qipNumber, registryAddress],
+    queryKey: queryKeys.qip(qipNumber, registryAddress),
     queryFn: async () => {
       if (!qipClient || qipNumber <= 0) return null;
 
       try {
-        // Step 1: Check if we have cached blockchain data
-        const cachedQIPData = queryClient.getQueryData<any>(['qip-blockchain', qipNumber, registryAddress]);
+        // FIRST: Check if we already have the full QIP data cached from the list page
+        const cachedFullQIP = queryClient.getQueryData<QIPData>(queryKeys.qip(qipNumber, registryAddress));
+        if (cachedFullQIP) {
+          console.log(`[useQIP] ✅ Using fully cached QIP data for QIP-${qipNumber} (no fetch needed!)`);
+          return cachedFullQIP;
+        }
+
+        console.log(`[useQIP] 🔍 No full cache for QIP-${qipNumber}, fetching...`);
+
+        // If no full cache, we need to fetch and assemble the data
+        // Step 1: Get blockchain data (check cache first)
+        const cachedBlockchain = queryClient.getQueryData<any>(queryKeys.qipBlockchain(qipNumber, registryAddress));
         
         let qip;
-        if (cachedQIPData) {
-          console.debug(`[useQIP] Using cached blockchain data for QIP ${qipNumber}`);
-          qip = cachedQIPData;
+        if (cachedBlockchain) {
+          console.log(`[useQIP] ✓ Using cached blockchain data for QIP-${qipNumber}`);
+          qip = cachedBlockchain;
         } else {
-          // Fetch from blockchain
+          console.log(`[useQIP] 🌐 Fetching blockchain data for QIP-${qipNumber}`);
           qip = await qipClient.getQIP(BigInt(qipNumber));
           
-          // Cache the blockchain data separately
-          queryClient.setQueryData(['qip-blockchain', qipNumber, registryAddress], qip, {
+          // Cache the blockchain data
+          queryClient.setQueryData(queryKeys.qipBlockchain(qipNumber, registryAddress), qip, {
             updatedAt: Date.now(),
           });
         }
         
         // Check if QIP exists
         if (!qip || qip.qipNumber === 0n) {
+          console.log(`[useQIP] ❌ QIP-${qipNumber} does not exist`);
           return null;
         }
 
-        // Step 2: Check for cached IPFS content
-        const ipfsCacheKey = ['ipfs', qip.ipfsUrl];
+        // Step 2: Get IPFS content (check cache first)
+        const ipfsCacheKey = queryKeys.ipfs(qip.ipfsUrl);
         const cachedIPFS = queryClient.getQueryData<any>(ipfsCacheKey);
         
         let ipfsContent, frontmatter, content;
         
         if (cachedIPFS) {
-          console.debug(`[useQIP] Using cached IPFS content for CID: ${qip.ipfsUrl}`);
+          console.log(`[useQIP] ✓ Using cached IPFS content for QIP-${qipNumber}`);
           ipfsContent = cachedIPFS.raw || cachedIPFS;
           const parsed = ipfsService.parseQIPMarkdown(ipfsContent);
           frontmatter = parsed.frontmatter;
           content = parsed.content;
         } else {
-          // Fetch from IPFS
+          console.log(`[useQIP] 🌐 Fetching IPFS content for QIP-${qipNumber} from ${qip.ipfsUrl}`);
           ipfsContent = await ipfsService.fetchQIP(qip.ipfsUrl);
           const parsed = ipfsService.parseQIPMarkdown(ipfsContent);
           frontmatter = parsed.frontmatter;
@@ -87,11 +99,12 @@ export function useQIP({
           });
         }
         
+        // Step 3: Assemble the full QIP data
         const implDate = qip.implementationDate > 0n 
           ? new Date(Number(qip.implementationDate) * 1000).toISOString().split('T')[0]
           : 'None';
         
-        return {
+        const fullQIPData: QIPData = {
           qipNumber,
           title: qip.title,
           network: qip.network,
@@ -116,8 +129,11 @@ export function useQIP({
           source: 'blockchain' as const,
           lastUpdated: Date.now()
         };
+
+        console.log(`[useQIP] ✅ Assembled full QIP-${qipNumber} data`);
+        return fullQIPData;
       } catch (error) {
-        console.error(`Error fetching QIP ${qipNumber}:`, error);
+        console.error(`[useQIP] ❌ Error fetching QIP ${qipNumber}:`, error);
         throw error;
       }
     },

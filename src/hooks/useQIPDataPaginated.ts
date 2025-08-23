@@ -1,9 +1,10 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { QIPClient, QIPStatus } from '../services/qipClient';
 import { getIPFSService } from '../services/getIPFSService';
 import { QIPData } from './useQIPData';
 import { config } from '../config/env';
+import { queryKeys, queryKeyPatterns } from '../utils/queryKeys';
 
 interface UseQIPDataPaginatedOptions {
   registryAddress?: `0x${string}`;
@@ -41,7 +42,7 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
   
   // Pagination state cache key
   const paginationCacheKey = React.useMemo(
-    () => ['qips-pagination-state', registryAddress],
+    () => queryKeys.qipsPaginationState(registryAddress),
     [registryAddress]
   );
   
@@ -111,13 +112,11 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
     }
   }, [loadedPages, loadedQIPs, allQIPNumbers, queryClient, paginationCacheKey]);
 
-  // Initialize services (memoized to avoid recreating on every render)
-  const qipClient = useMemo(() => 
-    registryAddress 
-      ? new QIPClient(registryAddress, config.baseRpcUrl, false)
-      : null,
-    [registryAddress]
-  );
+  // Initialize services - Create client synchronously to avoid enabled condition transitions
+  // This prevents the query from transitioning from disabled→enabled which forces a refetch
+  const qipClient = registryAddress 
+    ? new QIPClient(registryAddress, config.baseRpcUrl, false)
+    : null;
 
   const ipfsService = getIPFSService();
 
@@ -129,11 +128,20 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
     isError,
     refetch: refetchNumbers 
   } = useQuery({
-    queryKey: ['qip-numbers', registryAddress],
+    queryKey: queryKeys.qipNumbers(registryAddress),
     queryFn: async () => {
       if (!qipClient) {
         console.log("[useQIPDataPaginated] ❌ No QIP client available");
         return { numbers: [], total: 0 };
+      }
+
+      // Check if we already have cached data that's still fresh
+      const cachedData = queryClient.getQueryData<{ numbers: bigint[]; total: number }>(
+        queryKeys.qipNumbers(registryAddress)
+      );
+      if (cachedData) {
+        console.log("[useQIPDataPaginated] ✅ Using cached QIP numbers, skipping discovery phase");
+        return cachedData;
       }
 
       console.log("[useQIPDataPaginated] 🔍 Starting QIP discovery phase...");
@@ -195,13 +203,98 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
           
           console.log(`[useQIPDataPaginated]    ├─ Found: ${foundInBatch}/${batchNumbers.length} QIPs exist`);
           
+          // Process found QIPs and start prefetching
+          const prefetchPromises: Promise<void>[] = [];
+          
           for (const qip of batchQIPs) {
             if (qip && qip.qipNumber > 0n) {
               existingNumbers.push(qip.qipNumber);
               console.log(`[useQIPDataPaginated]    ├─ ✓ QIP-${qip.qipNumber}: "${qip.title}"`);
               foundCount++;
+              
+              // Cache the blockchain data immediately
+              queryClient.setQueryData(
+                queryKeys.qipBlockchain(Number(qip.qipNumber), registryAddress),
+                qip,
+                { updatedAt: Date.now() }
+              );
+              
+              // Prefetch IPFS content AND assemble full QIP data
+              if (qip.ipfsUrl) {
+                const prefetchPromise = (async () => {
+                  try {
+                    // Check if IPFS is already cached
+                    let ipfsData = queryClient.getQueryData<any>(queryKeys.ipfs(qip.ipfsUrl));
+                    
+                    if (!ipfsData) {
+                      console.log(`[useQIPDataPaginated]    │  └─ 🌐 Pre-fetching IPFS for QIP-${qip.qipNumber}`);
+                      const content = await ipfsService.fetchQIP(qip.ipfsUrl);
+                      const parsed = ipfsService.parseQIPMarkdown(content);
+                      ipfsData = { raw: content, ...parsed, cid: qip.ipfsUrl };
+                      
+                      // Cache the IPFS content
+                      queryClient.setQueryData(queryKeys.ipfs(qip.ipfsUrl), ipfsData, {
+                        updatedAt: Date.now(),
+                      });
+                    }
+                    
+                    // Now assemble and cache the full QIP data
+                    if (ipfsData) {
+                      const { frontmatter, content } = ipfsData;
+                      const implDate = qip.implementationDate > 0n 
+                        ? new Date(Number(qip.implementationDate) * 1000).toISOString().split('T')[0]
+                        : 'None';
+                      
+                      const fullQIPData: QIPData = {
+                        qipNumber: Number(qip.qipNumber),
+                        title: qip.title,
+                        network: qip.network,
+                        status: qipClient.getStatusString(qip.status),
+                        statusEnum: qip.status,
+                        ipfsStatus: frontmatter?.status,
+                        author: frontmatter?.author || qip.author,
+                        implementor: qip.implementor,
+                        implementationDate: implDate,
+                        proposal: (qip.snapshotProposalId && 
+                                  qip.snapshotProposalId !== 'TBU' && 
+                                  qip.snapshotProposalId !== 'tbu' &&
+                                  qip.snapshotProposalId !== 'None') 
+                                  ? qip.snapshotProposalId 
+                                  : 'None',
+                        created: frontmatter?.created || new Date(Number(qip.createdAt) * 1000).toISOString().split('T')[0],
+                        content: content || ipfsData.body || '',
+                        ipfsUrl: qip.ipfsUrl,
+                        contentHash: qip.contentHash,
+                        version: Number(qip.version),
+                        source: 'blockchain' as const,
+                        lastUpdated: Date.now()
+                      };
+                      
+                      // Cache the full QIP data for instant access when navigating
+                      queryClient.setQueryData(
+                        queryKeys.qip(Number(qip.qipNumber), registryAddress),
+                        fullQIPData,
+                        { updatedAt: Date.now() }
+                      );
+                      
+                      console.log(`[useQIPDataPaginated]    │  └─ ✅ Cached full QIP-${qip.qipNumber} data`);
+                    }
+                  } catch (error) {
+                    console.warn(`[useQIPDataPaginated]    │  └─ ⚠️ Pre-fetch failed for QIP-${qip.qipNumber}:`, error);
+                  }
+                })();
+                
+                prefetchPromises.push(prefetchPromise);
+              }
             }
           }
+          
+          // Start all IPFS prefetches in parallel, but don't wait for them
+          Promise.all(prefetchPromises).then(() => {
+            console.log(`[useQIPDataPaginated]    ├─ 🚀 Prefetched IPFS for ${prefetchPromises.length} QIPs`);
+          }).catch(err => {
+            console.warn(`[useQIPDataPaginated]    ├─ ⚠️ Some IPFS prefetches failed:`, err);
+          });
           
           checkedCount += batchNumbers.length;
           
@@ -233,9 +326,13 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
         total: sortedNumbers.length
       };
     },
-    enabled: enabled && !!registryAddress && !!qipClient,
-    staleTime: 60 * 1000, // 1 minute
-    gcTime: 5 * 60 * 1000, // 5 minutes
+    // Simplified enabled condition - qipClient is derived from registryAddress
+    enabled: enabled && !!registryAddress,
+    staleTime: 10 * 60 * 1000, // 10 minutes (matching QIP detail queries)
+    gcTime: 30 * 60 * 1000, // 30 minutes
+    refetchOnMount: false, // Don't refetch when component mounts
+    refetchOnWindowFocus: false, // Don't refetch on window focus
+    refetchOnReconnect: false, // Don't refetch on reconnect
   });
 
   // Update state when QIP numbers are fetched
@@ -281,44 +378,101 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
       console.log(`[useQIPDataPaginated] 📦 Batch ${batchNum}/${totalBatches}: QIPs [${batch.join(', ')}]`);
       
       try {
-        // Fetch blockchain data
-        console.log(`[useQIPDataPaginated]    ├─ 🔗 Fetching blockchain data...`);
-        const batchQIPs = await qipClient.getQIPsBatch(batch);
-        console.log(`[useQIPDataPaginated]    ├─ ✅ Got ${batchQIPs.length} QIPs from blockchain`);
+        // Check cache first, then fetch missing data
+        console.log(`[useQIPDataPaginated]    ├─ 📋 Checking cache for ${batch.length} QIPs...`);
         
-        // Collect all IPFS CIDs for concurrent fetching
-        const cidsToFetch = batchQIPs
+        const qipsToFetch: bigint[] = [];
+        const cachedQIPs: any[] = [];
+        
+        // Check what's already cached
+        for (const qipNumber of batch) {
+          const cached = queryClient.getQueryData(queryKeys.qipBlockchain(Number(qipNumber), registryAddress));
+          if (cached) {
+            cachedQIPs.push(cached);
+            console.log(`[useQIPDataPaginated]    │  ├─ ✅ Cache hit: QIP-${qipNumber}`);
+          } else {
+            qipsToFetch.push(qipNumber);
+            console.log(`[useQIPDataPaginated]    │  ├─ ❌ Cache miss: QIP-${qipNumber}`);
+          }
+        }
+        
+        // Fetch missing blockchain data
+        let batchQIPs = cachedQIPs;
+        if (qipsToFetch.length > 0) {
+          console.log(`[useQIPDataPaginated]    ├─ 🔗 Fetching ${qipsToFetch.length} missing QIPs from blockchain...`);
+          const freshQIPs = await qipClient.getQIPsBatch(qipsToFetch);
+          batchQIPs = [...cachedQIPs, ...freshQIPs];
+          
+          // Cache the fresh data
+          for (const qip of freshQIPs) {
+            if (qip && qip.qipNumber > 0n) {
+              queryClient.setQueryData(
+                queryKeys.qipBlockchain(Number(qip.qipNumber), registryAddress),
+                qip,
+                { updatedAt: Date.now() }
+              );
+            }
+          }
+        }
+        console.log(`[useQIPDataPaginated]    ├─ ✅ Got ${batchQIPs.length} QIPs (${cachedQIPs.length} cached, ${qipsToFetch.length} fetched)`);
+        
+        // Start IPFS fetches immediately and in parallel
+        const ipfsPromises = batchQIPs
           .filter(qip => qip && qip.qipNumber !== 0n && qip.ipfsUrl)
-          .map(qip => qip.ipfsUrl.startsWith("ipfs://") ? qip.ipfsUrl.slice(7) : qip.ipfsUrl);
+          .map(async (qip) => {
+            const cid = qip.ipfsUrl.startsWith("ipfs://") ? qip.ipfsUrl.slice(7) : qip.ipfsUrl;
+            
+            // Check cache first
+            const cached = queryClient.getQueryData(queryKeys.ipfs(qip.ipfsUrl));
+            if (cached) {
+              console.log(`[useQIPDataPaginated]    │  ├─ ✅ IPFS cache hit: QIP-${qip.qipNumber}`);
+              return { qip, ipfsContent: cached };
+            }
+            
+            // Fetch if not cached
+            try {
+              console.log(`[useQIPDataPaginated]    │  ├─ 🌐 Fetching IPFS: QIP-${qip.qipNumber}`);
+              const content = await ipfsService.fetchQIP(qip.ipfsUrl);
+              const parsed = ipfsService.parseQIPMarkdown(content);
+              const ipfsData = { raw: content, ...parsed, cid: qip.ipfsUrl };
+              
+              // Cache the IPFS content
+              queryClient.setQueryData(queryKeys.ipfs(qip.ipfsUrl), ipfsData, {
+                updatedAt: Date.now(),
+                staleTime: Infinity,
+              });
+              
+              return { qip, ipfsContent: ipfsData };
+            } catch (error) {
+              console.warn(`[useQIPDataPaginated]    │  ├─ ⚠️ IPFS fetch failed: QIP-${qip.qipNumber}`, error);
+              return { qip, ipfsContent: null };
+            }
+          });
         
-        // Fetch all IPFS content concurrently using rotating gateways
-        console.log(`[useQIPDataPaginated]    ├─ 🌐 Fetching ${cidsToFetch.length} QIPs from IPFS...`);
-        const ipfsContents = await ipfsService.fetchMultipleQIPs(cidsToFetch);
-        console.log(`[useQIPDataPaginated]    ├─ ✅ Got ${ipfsContents.size} IPFS responses`);
+        // Wait for all IPFS fetches to complete in parallel
+        const ipfsResults = await Promise.all(ipfsPromises);
+        console.log(`[useQIPDataPaginated]    ├─ ✅ Got ${ipfsResults.filter(r => r.ipfsContent).length} IPFS responses`);
         
         // Process each QIP with its IPFS content
-        console.log(`[useQIPDataPaginated]    ├─ 📝 Processing ${batchQIPs.length} QIPs...`);
+        console.log(`[useQIPDataPaginated]    ├─ 📝 Processing ${ipfsResults.length} QIPs...`);
         let processedCount = 0;
         let skippedCount = 0;
         
-        for (const qip of batchQIPs) {
+        for (const { qip, ipfsContent } of ipfsResults) {
           if (!qip || qip.qipNumber === 0n) {
             console.log(`[useQIPDataPaginated]       ├─ ⚠️ Skipping empty QIP slot`);
             skippedCount++;
             continue;
           }
           
+          if (!ipfsContent) {
+            console.warn(`[useQIPDataPaginated]       ├─ ⚠️ QIP-${qip.qipNumber}: No IPFS content`);
+            skippedCount++;
+            continue;
+          }
+          
           try {
-            const cid = qip.ipfsUrl.startsWith("ipfs://") ? qip.ipfsUrl.slice(7) : qip.ipfsUrl;
-            const ipfsContent = ipfsContents.get(cid);
-            
-            if (!ipfsContent) {
-              console.warn(`[useQIPDataPaginated]       ├─ ⚠️ QIP-${qip.qipNumber}: No IPFS content (CID: ${cid})`);
-              skippedCount++;
-              continue;
-            }
-            
-            const { frontmatter, content } = ipfsService.parseQIPMarkdown(ipfsContent);
+            const { frontmatter, body: content } = ipfsContent;
 
             const implDate = qip.implementationDate > 0n 
               ? new Date(Number(qip.implementationDate) * 1000).toISOString().split("T")[0] 
@@ -354,25 +508,12 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
             
             // Cache this QIP data for the individual QIP hook to use
             queryClient.setQueryData(
-              ['qip', Number(qip.qipNumber), registryAddress],
+              queryKeys.qip(Number(qip.qipNumber), registryAddress),
               qipData,
               { updatedAt: Date.now() }
             );
             
-            // Also cache the blockchain data separately
-            queryClient.setQueryData(
-              ['qip-blockchain', Number(qip.qipNumber), registryAddress],
-              qip,
-              { updatedAt: Date.now() }
-            );
-            
-            // Cache IPFS content separately
-            queryClient.setQueryData(['ipfs', qip.ipfsUrl], {
-              raw: ipfsContent,
-              frontmatter,
-              body: content,
-              cid: qip.ipfsUrl,
-            }, { updatedAt: Date.now() });
+            // Blockchain and IPFS data are already cached from earlier
             
             qips.push(qipData);
             processedCount++;
@@ -408,11 +549,13 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
                                  (!paginationState || paginationState.loadedQIPs.length === 0);
   
   const { data: initialQIPs, isLoading: isLoadingInitial, isFetching: isFetchingInitial } = useQuery({
-    queryKey: ['qips-page', registryAddress, 0, pageSize],
+    queryKey: queryKeys.qipsPage(registryAddress, 0, pageSize),
     queryFn: () => fetchQIPsForPage(0),
     enabled: shouldLoadInitialPage,
-    staleTime: 30 * 1000,
-    gcTime: 5 * 60 * 1000,
+    staleTime: 10 * 60 * 1000, // 10 minutes (consistent with QIP numbers)
+    gcTime: 30 * 60 * 1000, // 30 minutes
+    refetchOnMount: false, // Don't refetch when component mounts
+    refetchOnWindowFocus: false, // Don't refetch on window focus
   });
 
   // Update loaded QIPs when initial page loads (only if we're starting fresh)
@@ -478,7 +621,7 @@ export function useQIPDataPaginated(options: UseQIPDataPaginatedOptions = {}): P
       loadedQIPs: [],
       allQIPNumbers: [],
     });
-    queryClient.invalidateQueries({ queryKey: ['qips-page'] });
+    queryClient.invalidateQueries({ queryKey: queryKeyPatterns.allPages });
   }, [queryClient, paginationCacheKey]);
 
   // Invalidate all data

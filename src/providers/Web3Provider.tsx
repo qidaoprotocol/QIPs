@@ -1,6 +1,7 @@
 import React from 'react'
 import { WagmiProvider, createConfig, http } from 'wagmi'
 import { QueryClientProvider } from '@tanstack/react-query'
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { ConnectKitProvider } from 'connectkit'
 import { mainnet } from 'wagmi/chains'
 import { injected, walletConnect } from 'wagmi/connectors'
@@ -80,6 +81,7 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
         >
           {children}
         </ConnectKitProvider>
+        {config.isDevelopment && <ReactQueryDevtools initialIsOpen={false} />}
       </QueryClientProvider>
     </WagmiProvider>
   )

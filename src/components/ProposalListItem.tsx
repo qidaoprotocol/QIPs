@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import Author from './Author';
 import { useQueryClient } from '@tanstack/react-query';
 import { QIPClient } from '../services/qipClient';
@@ -156,8 +157,8 @@ const ProposalListItem = (props: any) => {
                                                 {data.status}
                                             </span>
                                         </div>
-                                        <a
-                                            href={`/qips/QIP-${data.qip}`}
+                                        <Link
+                                            to={`/qips/${data.qip}`}
                                             className="cursor-pointer"
                                             onMouseEnter={() => handleMouseEnter(data.qip)}
                                         >
@@ -176,7 +177,7 @@ const ProposalListItem = (props: any) => {
                                                 {data.shortDescription}
                                             </p>
                                             {/* Add more nested elements here */}
-                                        </a>
+                                        </Link>
                                         <div className="">
                                             {/* Add more elements here */}
                                         </div>
