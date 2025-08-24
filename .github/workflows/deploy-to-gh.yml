@@ -69,7 +69,9 @@ jobs:
           VITE_LOCAL_MODE: 'false'
         run: |
           bunx tsc --noEmit
-          bun run build -- --base=/${{ github.event.repository.name }}/
+          # Build without base path for custom domain deployment
+          # GitHub Pages with custom domains serve from root, not from /<repo-name>/
+          bun run build
           cp dist/index.html dist/404.html
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
