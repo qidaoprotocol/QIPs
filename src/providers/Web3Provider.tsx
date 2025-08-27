@@ -27,10 +27,7 @@ const wagmiConfig = createConfig({
     injected(),
     walletConnect({ 
       projectId: config.walletConnectProjectId || 'dummy-project-id',
-      showQrModal: true,
-      qrModalOptions: {
-        themeMode: 'light',
-      },
+      showQrModal: false, 
     }),
   ],
 })
