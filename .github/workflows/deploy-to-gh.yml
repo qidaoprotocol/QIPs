@@ -52,6 +52,9 @@ jobs:
           # Required for IPFS uploads via Mai API
           VITE_IPFS_API_URL: ${{ secrets.IPFS_API_URL }}
           
+          # Mai API endpoint for fetching QIPs (24x performance improvement)
+          VITE_MAI_API_URL: ${{ vars.VITE_MAI_API_URL || secrets.MAI_API_URL || 'https://api.mai.finance' }}
+          
           # Optional: Snapshot governance space (defaults to qidao.eth)
           VITE_SNAPSHOT_SPACE: ${{ secrets.SNAPSHOT_SPACE || 'qidao.eth' }}
           
