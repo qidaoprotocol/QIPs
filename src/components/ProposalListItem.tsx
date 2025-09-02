@@ -144,67 +144,44 @@ const ProposalListItem = (props: any) => {
                 const data = getProposalData(proposal);
                 
                 return (
-                    <div
-                        key={index}
-                        className="border-y border-skin-border bg-skin-block-bg text-base md:rounded-xl md:border transition-colors mb-3"
-                    >
-                        <div className="leading-5 sm:leading-6">
+                  <div
+                    key={index}
+                    className="border-y border-skin-border bg-skin-block-bg text-base md:rounded-xl md:border transition-colors mb-3"
+                  >
+                    <Link to={`/qips/${data.qip}`} className="cursor-pointer" onMouseEnter={() => handleMouseEnter(data.qip)}>
+                      <div className="leading-5 sm:leading-6">
+                        <div>
+                          <div className="block p-3 text-skin-text sm:p-4">
                             <div>
-                                <div className="block p-3 text-skin-text sm:p-4">
-                                    <div>
-                                        <div className="flex h-[26px] items-start justify-between">
-                                            <div className="flex items-center gap-1">
-                                                <div className="flex">
-                                                    <button
-                                                        id="headlessui-popover-button-15"
-                                                        type="button"
-                                                        aria-expanded="false"
-                                                        data-headlessui-state=""
-                                                    >
-                                                        <div
-                                                            className="whitespace-nowrap"
-                                                            tabIndex={-1}
-                                                        >
-                                                            <Author
-                                                                author={data.author}
-                                                            />
-                                                        </div>
-                                                    </button>
-                                                </div>
-                                            </div>
-                                            <span style={{backgroundColor: statusColor[data.status]}} className="bg-[#BB6BD9] State text-white p-[1px] px-[7px] rounded-[14px] font-normal">
-                                                {data.status}
-                                            </span>
-                                        </div>
-                                        <Link
-                                            to={`/qips/${data.qip}`}
-                                            className="cursor-pointer"
-                                            onMouseEnter={() => handleMouseEnter(data.qip)}
-                                        >
-                                            <div className="relative flex mb-1 mt-3 break-words pr-[80px] leading-[32px]">
-                                                {/* <span className='mr-1'>
-                                                    <img className='w-[25px] rounded-[20px]' src="https://cdn.stamp.fyi/avatar/eth:0xAd95A5fE898679B927C266eB2eDfAbC7fe268C27?s=40" alt="" />
-                                                </span> */}
-
-                                                <h3 className="inline pr-2">
-                                                    {data.title?.startsWith(`QIP-${data.qip}`) || data.title?.startsWith(`QIP ${data.qip}`)
-                                                        ? data.title
-                                                        : `QIP-${data.qip}: ${data.title}`}
-                                                </h3>
-                                            </div>
-                                            <p className="line-clamp-2 break-words text-md font-semibold">
-                                                {data.shortDescription}
-                                            </p>
-                                            {/* Add more nested elements here */}
-                                        </Link>
-                                        <div className="">
-                                            {/* Add more elements here */}
-                                        </div>
-                                    </div>
+                              <div className="flex h-[26px] items-start justify-between">
+                                <div className="flex items-center gap-3">
+                                  <span className="text-sm text-gray-500 font-medium">QIP-{data.qip}</span>
+                                  <div className="flex">
+                                    <button
+                                      id="headlessui-popover-button-15"
+                                      type="button"
+                                      aria-expanded="false"
+                                      data-headlessui-state=""
+                                    ></button>
+                                  </div>
                                 </div>
+                                <span
+                                  style={{ backgroundColor: statusColor[data.status] }}
+                                  className="bg-[#BB6BD9] State text-white p-[1px] px-[7px] rounded-[14px] font-normal"
+                                >
+                                  {data.status}
+                                </span>
+                              </div>
+                              <div className="relative flex mb-2 mt-4 break-words pr-[80px] leading-[44px]">
+                                <h3 className="inline pr-2 text-xl font-bold text-gray-900">{data.title}</h3>
+                              </div>
+                              <div className="">{/* Add more elements here */}</div>
                             </div>
+                          </div>
                         </div>
-                    </div>
+                      </div>
+                    </Link>
+                  </div>
                 );
             })}
         </div>

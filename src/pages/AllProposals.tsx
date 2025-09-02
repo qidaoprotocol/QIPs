@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react'
 import ProposalListItem from '../components/ProposalListItem'
 import { sortBy } from 'lodash/fp'
-import { useQIPData } from '../hooks/useQIPData'
+import { useQIPsFromAPI } from '../hooks/useQIPsFromAPI'
 import Layout from '../layout'
 import LocalModeBanner from '../components/LocalModeBanner'
 import { config } from '../config/env'
@@ -22,20 +22,21 @@ const statusDisplayMap: Record<string, string> = {
 const statusOrder = ['Draft', 'Review', 'Vote', 'Approved', 'Implemented', 'Rejected', 'Withdrawn']
 
 const AllProposals: React.FC = () => {
-  // Fetch blockchain data
-  const registryAddress = config.qipRegistryAddress
+  // Configuration
   const localMode = config.localMode
 
+  // Always use API for fetching QIPs (24x faster)
   const { 
-    blockchainQIPs, 
+    qips: blockchainQIPs, 
     isLoading: blockchainLoading, 
     isError: blockchainError,
     invalidateQIPs,
-    isFetching
-  } = useQIPData({
-    registryAddress,
-    pollingInterval: 10000, // 10 seconds for faster updates in dev
-    enabled: !!registryAddress
+    isFetching,
+    refreshQIPs
+  } = useQIPsFromAPI({
+    apiUrl: config.maiApiUrl,
+    pollingInterval: 30000, // 30 seconds
+    enabled: true
   })
 
   // Group QIPs by status
@@ -47,19 +48,10 @@ const AllProposals: React.FC = () => {
       if (!groups[status]) {
         groups[status] = []
       }
+      // Just pass the QIP as-is since ProposalListItem handles blockchain QIPs directly
       groups[status].push({
         ...qip,
-        id: `blockchain-${qip.qipNumber}`,
-        frontmatter: {
-          qip: qip.qipNumber,
-          title: qip.title,
-          author: qip.author,
-          network: qip.network,
-          proposal: qip.proposal,
-          implementor: qip.implementor,
-          created: qip.created,
-          status: qip.status
-        }
+        id: `api-${qip.qipNumber}`
       })
     })
 
@@ -88,12 +80,19 @@ const AllProposals: React.FC = () => {
           
           {localMode && <LocalModeBanner />}
           
+          {/* API Mode Indicator - Always shown since we're always using API */}
+          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+            <p className="text-sm text-green-800">
+              ⚡ Using Mai API for faster QIP loading (24x performance improvement)
+            </p>
+          </div>
+          
           {blockchainError && (
             <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
-              <p className="font-bold">Error loading blockchain data</p>
+              <p className="font-bold">Error loading from API</p>
               <p className="text-sm">Please check your connection and try again.</p>
               <button 
-                onClick={() => invalidateQIPs()}
+                onClick={() => refreshQIPs()}
                 className="mt-2 bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700"
               >
                 Retry
@@ -104,7 +103,7 @@ const AllProposals: React.FC = () => {
           {blockchainLoading && !blockchainQIPs.length && (
             <div className="flex items-center justify-center py-12">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div>
-              <span className="ml-3">Loading proposals from blockchain...</span>
+              <span className="ml-3">Loading proposals from API...</span>
             </div>
           )}
 

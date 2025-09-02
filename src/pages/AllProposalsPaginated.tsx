@@ -1,7 +1,7 @@
 import React, { useMemo, useEffect, useRef, useCallback } from 'react'
 import ProposalListItem from '../components/ProposalListItem'
 import { sortBy } from 'lodash/fp'
-import { useQIPDataPaginated } from '../hooks/useQIPDataPaginated'
+import { useQIPsFromAPI } from '../hooks/useQIPsFromAPI'
 import Layout from '../layout'
 import LocalModeBanner from '../components/LocalModeBanner'
 import { config } from '../config/env'
@@ -22,26 +22,27 @@ const statusDisplayMap: Record<string, string> = {
 const statusOrder = ['Draft', 'Review', 'Vote', 'Approved', 'Implemented', 'Rejected', 'Withdrawn']
 
 const AllProposalsPaginated: React.FC = () => {
-  const registryAddress = config.qipRegistryAddress
   const localMode = config.localMode
   const loadMoreRef = useRef<HTMLDivElement>(null)
 
+  // Use API directly - it's fast enough that we don't need pagination
   const {
     qips,
-    totalCount,
-    currentPage,
-    totalPages,
-    hasMore,
     isLoading,
     isError,
-    isFetchingMore,
-    loadMore,
-    invalidate,
-  } = useQIPDataPaginated({
-    registryAddress,
-    pageSize: 10,
-    enabled: !!registryAddress
+    invalidateQIPs: invalidate,
+    isFetching: isFetchingMore
+  } = useQIPsFromAPI({
+    apiUrl: config.maiApiUrl,
+    enabled: true
   })
+  
+  // Since API is fast, we don't need pagination
+  const totalCount = qips.length
+  const currentPage = 1
+  const totalPages = 1
+  const hasMore = false
+  const loadMore = () => {} // No-op since we load everything at once
 
   // Intersection Observer for infinite scroll
   useEffect(() => {

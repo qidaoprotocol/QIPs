@@ -51,6 +51,9 @@ export const config = {
   ipfsApiUrl: getEnvVar("VITE_IPFS_API_URL", ""),
   useMaiApi: getBoolEnvVar("VITE_USE_MAI_API", false),
 
+  // Mai API Configuration for QIP fetching
+  maiApiUrl: getEnvVar("VITE_MAI_API_URL", "https://api.mai.finance"),
+  
   // App Configuration
   localMode: getBoolEnvVar("VITE_LOCAL_MODE", false),
   useTestnet: getBoolEnvVar("VITE_USE_TESTNET", false),
@@ -90,5 +93,6 @@ if (config.isDevelopment) {
     useLocalIPFS: config.useLocalIPFS,
     localMode: config.localMode,
     walletConnectConfigured: !!config.walletConnectProjectId,
+    maiApiUrl: config.maiApiUrl,
   });
 }

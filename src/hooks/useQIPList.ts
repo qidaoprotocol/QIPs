@@ -44,14 +44,24 @@ export function useQIPList({
       
       const qips: QIPData[] = [];
       
-      // Workaround for contract bug: directly fetch QIPs 209-248
-      console.log('[useQIPList] Using workaround to fetch QIPs 209-248 directly with multicall batching');
-
-      // Create array of QIP numbers to fetch
-      const qipNumbers: bigint[] = [];
-      for (let qipNum = 209; qipNum <= 248; qipNum++) {
-        qipNumbers.push(BigInt(qipNum));
+      // First, get the next QIP number to determine the upper bound
+      let maxQipNumber: bigint;
+      try {
+        const nextQipNumber = await qipClient.getNextQIPNumber();
+        maxQipNumber = nextQipNumber - 1n; // The last QIP is nextQIPNumber - 1
+        console.log('[useQIPList] Registry range: QIP 209 to', maxQipNumber.toString());
+      } catch (error) {
+        console.warn('[useQIPList] Failed to get nextQIPNumber, falling back to hardcoded range');
+        maxQipNumber = 248n; // Fallback to known range if contract call fails
       }
+
+      // Create array of QIP numbers to fetch (starting from 209, the first QIP in registry)
+      const qipNumbers: bigint[] = [];
+      for (let qipNum = 209n; qipNum <= maxQipNumber; qipNum++) {
+        qipNumbers.push(qipNum);
+      }
+      
+      console.log(`[useQIPList] Fetching QIPs 209-${maxQipNumber} (${qipNumbers.length} total) with multicall batching`);
 
       // Batch fetch all QIPs using multicall
       const BATCH_SIZE = 5; // Reduced to avoid gas limits

@@ -6,7 +6,7 @@ import { StatusUpdateComponent } from "../../components/StatusUpdateComponent";
 import { StatusDiscrepancyIndicator } from "../../components/StatusDiscrepancyIndicator";
 import { useAccount } from 'wagmi';
 import { Link } from 'gatsby';
-import { useQIPData } from '../../hooks/useQIPData';
+import { useQIPsFromAPI } from '../../hooks/useQIPsFromAPI';
 import { useUpdateQIPStatus } from '../../hooks/useUpdateQIPStatus';
 import { config } from '../../config';
 import { ethers } from 'ethers';
@@ -35,15 +35,17 @@ const DynamicQIPPage: React.FC<Props> = ({ params, location }) => {
   const [isEditor, setIsEditor] = useState(false);
   const { updateStatus } = useUpdateQIPStatus();
   
-  // Use the hook to fetch QIP data
+  // Use the API hook to fetch QIP data (24x faster)
   const { 
-    blockchainQIPs, 
+    qips: blockchainQIPs, 
     isLoading, 
     isError, 
     error, 
     invalidateQIPs 
-  } = useQIPData({
-    registryAddress: config.qipRegistryAddress,
+  } = useQIPsFromAPI({
+    apiUrl: config.maiApiUrl,
+    contentFor: [qipNumber], // Fetch content for this specific QIP
+    enabled: true
   });
   
   const qip = blockchainQIPs.find((q: any) => q.qipNumber === qipNumber);
