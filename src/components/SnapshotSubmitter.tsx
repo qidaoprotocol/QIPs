@@ -19,8 +19,8 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({ frontmatter, html
   const [highestQip, setHighestQip] = useState<number | null>(null);
 
   const SNAPSHOT_SPACE = config.snapshotSpace;
-  const isDefaultSpace = SNAPSHOT_SPACE === 'qidao.eth';
-  
+  const isDefaultSpace = SNAPSHOT_SPACE === "qidao.eth";
+
   // Conditional validation based on space
   const requiresTokenBalance = isDefaultSpace;
   const requiresQipValidation = isDefaultSpace;
@@ -66,7 +66,7 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({ frontmatter, html
     refetchInterval: 60000,
   });
 
-  const isQipValid = requiresQipValidation ? (highestQip !== null && frontmatter.qip === highestQip + 1) : true;
+  const isQipValid = requiresQipValidation ? highestQip !== null && frontmatter.qip === highestQip + 1 : true;
   const space = SNAPSHOT_SPACE;
 
   const handleSubmit = async () => {
@@ -82,10 +82,10 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({ frontmatter, html
     setStatus(null);
     try {
       // Always use Ethereum mainnet blocks for all Snapshot proposals
-      const ethProvider = new ethers.providers.JsonRpcProvider('https://eth.llamarpc.com');
+      const ethProvider = new ethers.providers.JsonRpcProvider("https://eth.llamarpc.com");
       const snapshotBlock = await ethProvider.getBlockNumber();
-      console.log('Using Ethereum mainnet block for snapshot:', snapshotBlock);
-      
+      console.log("Using Ethereum mainnet block for snapshot:", snapshotBlock);
+
       // Calculate timestamps right before submission
       const now = Math.floor(Date.now() / 1000);
       const startOffset = 86400; // Exactly 24 hours
@@ -149,9 +149,7 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({ frontmatter, html
             {status}
           </p>
         )}
-        {!isDefaultSpace && (
-          <p className="mt-1 text-xs text-blue-600">Submitting to space: {SNAPSHOT_SPACE}</p>
-        )}
+        {!isDefaultSpace && <p className="mt-1 text-xs text-blue-600">Submitting to space: {SNAPSHOT_SPACE}</p>}
         {signer && requiresTokenBalance && tokenBalance >= REQUIRED_BALANCE && (
           <p className="mt-1 text-xs text-gray-600">Token balance: {tokenBalance.toLocaleString()} (✓ meets requirement)</p>
         )}
@@ -160,12 +158,24 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({ frontmatter, html
       <div className="flex justify-center sm:m-0 m-3">
         <button
           className={`m-auto w-fit px-6 py-3 rounded-lg font-medium transition-colors ${
-            !signer || (requiresTokenBalance && tokenBalance < REQUIRED_BALANCE) || loading || (requiresTokenBalance && checkingBalance) || !isQipValid || (requiresQipValidation && loadingProposals)
+            !signer ||
+            (requiresTokenBalance && tokenBalance < REQUIRED_BALANCE) ||
+            loading ||
+            (requiresTokenBalance && checkingBalance) ||
+            !isQipValid ||
+            (requiresQipValidation && loadingProposals)
               ? "bg-gray-400 cursor-not-allowed"
               : "bg-blue-600 hover:bg-blue-700"
           } text-white`}
           onClick={handleSubmit}
-          disabled={!signer || (requiresTokenBalance && tokenBalance < REQUIRED_BALANCE) || loading || (requiresTokenBalance && checkingBalance) || !isQipValid || (requiresQipValidation && loadingProposals)}
+          disabled={
+            !signer ||
+            (requiresTokenBalance && tokenBalance < REQUIRED_BALANCE) ||
+            loading ||
+            (requiresTokenBalance && checkingBalance) ||
+            !isQipValid ||
+            (requiresQipValidation && loadingProposals)
+          }
         >
           {loading
             ? "Submitting..."
