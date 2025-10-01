@@ -1,16 +1,39 @@
 import { useQuery } from "@tanstack/react-query";
-import { ethers } from "ethers";
+import { createPublicClient, http, formatUnits } from "viem";
+import { mainnet } from "viem/chains";
 import { useEthersSigner } from "../utils/ethers";
 import { config } from "../config";
 
 const TOKEN_CONTRACT_ADDRESS = "0x1bffabc6dfcafb4177046db6686e3f135e8bc732";
 const REQUIRED_BALANCE = 150000;
-const ERC20_ABI = ["function balanceOf(address owner) view returns (uint256)", "function decimals() view returns (uint8)"];
+const ERC20_ABI = [
+  {
+    inputs: [{ name: "owner", type: "address" }],
+    name: "balanceOf",
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "decimals",
+    outputs: [{ name: "", type: "uint8" }],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+
+// Create a dedicated Ethereum mainnet client for token balance checks
+const mainnetClient = createPublicClient({
+  chain: mainnet,
+  transport: http(),
+});
 
 /**
  * Global hook to check QI token balance for Snapshot submissions
  * Only runs in production mode (when using qidao.eth space)
  * Shared across all components via React Query cache
+ * Always checks balance on Ethereum mainnet regardless of connected network
  */
 export function useQITokenBalance() {
   const signer = useEthersSigner();
@@ -22,10 +45,24 @@ export function useQITokenBalance() {
 
   const fetchTokenBalance = async () => {
     if (!signer || !requiresTokenBalance) return REQUIRED_BALANCE; // Return valid balance for non-default spaces
-    const tokenContract = new ethers.Contract(TOKEN_CONTRACT_ADDRESS, ERC20_ABI, signer);
+
     const address = await signer.getAddress();
-    const [balance, decimals] = await Promise.all([tokenContract.balanceOf(address), tokenContract.decimals()]);
-    return Number(ethers.utils.formatUnits(balance, decimals));
+
+    const [balance, decimals] = await Promise.all([
+      mainnetClient.readContract({
+        address: TOKEN_CONTRACT_ADDRESS,
+        abi: ERC20_ABI,
+        functionName: "balanceOf",
+        args: [address as `0x${string}`],
+      }),
+      mainnetClient.readContract({
+        address: TOKEN_CONTRACT_ADDRESS,
+        abi: ERC20_ABI,
+        functionName: "decimals",
+      }),
+    ]);
+
+    return Number(formatUnits(balance, decimals));
   };
 
   const query = useQuery({
