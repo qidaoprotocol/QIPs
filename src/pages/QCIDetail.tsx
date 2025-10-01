@@ -274,8 +274,8 @@ const QCIDetail: React.FC = () => {
 
       console.log('[QCIDetail] Final permissions - authorCheck:', authorCheck, 'editorCheck:', editorCheck);
       setCanEdit(authorCheck || editorCheck)
-      // Editors can submit to snapshot even if they're not the author
-      setCanSubmitSnapshot(authorCheck || editorCheck)
+      // Anyone with a connected wallet can submit to snapshot
+      setCanSubmitSnapshot(!!address)
     }
 
     // Debounce the check to avoid rapid re-execution

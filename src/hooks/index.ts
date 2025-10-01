@@ -5,3 +5,4 @@ export { useQCIList } from './useQCIList';
 export { useCreateQCI } from './useCreateQCI';
 export { useUpdateQCI } from './useUpdateQCI';
 export { useQCIVersionHistory } from './useQCIVersionHistory';
+export { useQITokenBalance } from './useQITokenBalance';

@@ -3,6 +3,7 @@ import Navigation from '../components/Navigation';
 import Footer from '../components/Footer';
 import LocalModeBanner from '../components/LocalModeBanner';
 import { Toaster } from '@/components/ui/sonner';
+import { useQITokenBalance } from '../hooks/useQITokenBalance';
 
 interface Props {
     children: React.ReactNode;
@@ -10,6 +11,9 @@ interface Props {
 
 const Layout: React.FC<Props> = ({ children }) => {
     // Theme is now managed by the ThemeProvider context
+
+    // Pre-cache QI token balance on site load (runs when wallet connected in prod mode)
+    useQITokenBalance();
 
     return (
         <main className="min-h-screen">

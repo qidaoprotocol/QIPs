@@ -12,6 +12,7 @@ import { AlertCircle, CheckCircle2, ExternalLink, Loader2 } from "lucide-react";
 import { useWalletClient, usePublicClient } from "wagmi";
 import { QCIRegistryABI } from "../config/abis/QCIRegistry";
 import { getLatestQipNumber } from "../utils/snapshotClient";
+import { useQITokenBalance } from "../hooks/useQITokenBalance";
 
 interface SnapshotSubmitterProps {
   frontmatter: any;
@@ -65,10 +66,9 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
   // Determine which space to use based on test mode
   const isTestMode = config.snapshotTestMode;
   const SNAPSHOT_SPACE = isTestMode ? config.snapshotTestSpace : config.snapshotSpace;
-  const isDefaultSpace = config.snapshotSpace === "qidao.eth" && !isTestMode;
 
-  // Conditional validation based on space
-  const requiresTokenBalance = isDefaultSpace;
+  // Use global QI token balance hook (pre-cached on site load)
+  const { tokenBalance, isLoading: checkingBalance, requiresTokenBalance, requiredBalance } = useQITokenBalance();
 
   const formatProposalBody = (rawMarkdown: string, frontmatter: any, transactions?: string[]) => {
     // Remove frontmatter from the beginning of the markdown
@@ -120,26 +120,6 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
 
     return fullBody;
   };
-
-  const TOKEN_CONTRACT_ADDRESS = "0x1bffabc6dfcafb4177046db6686e3f135e8bc732";
-  const REQUIRED_BALANCE = 150000;
-  const ERC20_ABI = ["function balanceOf(address owner) view returns (uint256)", "function decimals() view returns (uint8)"];
-
-  const fetchTokenBalance = async () => {
-    if (!signer || !requiresTokenBalance) return REQUIRED_BALANCE; // Return valid balance for non-default spaces
-    const tokenContract = new ethers.Contract(TOKEN_CONTRACT_ADDRESS, ERC20_ABI, signer);
-    const address = await signer.getAddress();
-    const [balance, decimals] = await Promise.all([tokenContract.balanceOf(address), tokenContract.decimals()]);
-    return Number(ethers.utils.formatUnits(balance, decimals));
-  };
-
-  const { data: tokenBalance = requiresTokenBalance ? 0 : REQUIRED_BALANCE, isLoading: checkingBalance } = useQuery({
-    queryKey: ["tokenBalance", TOKEN_CONTRACT_ADDRESS, signer ? "connected" : "disconnected", requiresTokenBalance],
-    queryFn: fetchTokenBalance,
-    enabled: !!signer,
-    staleTime: 30000,
-    refetchInterval: 60000,
-  });
 
   const space = SNAPSHOT_SPACE;
 
@@ -481,7 +461,7 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
         )}
 
         {/* Prerequisites Info */}
-        {signer && requiresTokenBalance && tokenBalance >= REQUIRED_BALANCE && (
+        {signer && requiresTokenBalance && tokenBalance >= requiredBalance && (
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <CheckCircle2 className="h-4 w-4 text-green-600" />
@@ -528,7 +508,7 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
         <Button
           onClick={handleSubmit}
           disabled={
-            !signer || (requiresTokenBalance && tokenBalance < REQUIRED_BALANCE) || loading || (requiresTokenBalance && checkingBalance)
+            !signer || (requiresTokenBalance && tokenBalance < requiredBalance) || loading || (requiresTokenBalance && checkingBalance)
           }
           className="w-full"
           size="xl"
@@ -540,13 +520,11 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
             ? "Checking prerequisites..."
             : !signer
             ? "Connect Wallet"
-            : requiresTokenBalance && tokenBalance < REQUIRED_BALANCE
-            ? `Insufficient Balance (${tokenBalance.toLocaleString()} / ${REQUIRED_BALANCE.toLocaleString()} required)`
+            : requiresTokenBalance && tokenBalance < requiredBalance
+            ? `Insufficient Balance (${tokenBalance.toLocaleString()} / ${requiredBalance.toLocaleString()} required)`
             : isTestMode
             ? `Submit Test QIP to ${SNAPSHOT_SPACE}`
-            : !isDefaultSpace
-            ? `Submit QIP to ${SNAPSHOT_SPACE}`
-            : "Submit QIP to Snapshot"}
+            : `Submit QIP to ${SNAPSHOT_SPACE}`}
         </Button>
       </CardFooter>
     </Card>
