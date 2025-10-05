@@ -76,6 +76,22 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
       try {
         console.log('[Web3Provider] 🚀 Preloading statuses...');
 
+        // Check if statuses are already in cache and fresh
+        const existingData = queryClient.getQueryData(queryKeys.allStatuses(config.qciRegistryAddress));
+        const queryState = queryClient.getQueryState(queryKeys.allStatuses(config.qciRegistryAddress));
+
+        // Only prefetch if:
+        // 1. No data exists, OR
+        // 2. Data is stale (older than 15 minutes)
+        const shouldPrefetch = !existingData ||
+          !queryState ||
+          (queryState.dataUpdatedAt && Date.now() - queryState.dataUpdatedAt > 15 * 60 * 1000);
+
+        if (!shouldPrefetch) {
+          console.log('[Web3Provider] ✓ Statuses already cached and fresh, skipping prefetch');
+          return;
+        }
+
         // Use prefetchQuery to load data into cache without triggering component re-renders
         await queryClient.prefetchQuery({
           queryKey: queryKeys.allStatuses(config.qciRegistryAddress),

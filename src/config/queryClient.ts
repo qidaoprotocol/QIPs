@@ -91,10 +91,23 @@ export function setupPersistentCache(queryClient: QueryClient) {
       persister,
       maxAge: 24 * 60 * 60 * 1000, // 24 hours max age
       dehydrateOptions: {
-        // Don't dehydrate queries older than 1 hour
+        // Persist long-lived queries more aggressively
         shouldDehydrateQuery: (query: any) => {
           const state = query.state;
-          const isOld = Date.now() - state.dataUpdatedAt > 60 * 60 * 1000;
+          const queryKey = query.queryKey;
+
+          // ALWAYS persist status queries (they're quasi-static)
+          if (Array.isArray(queryKey) && queryKey[0] === 'statuses') {
+            return true;
+          }
+
+          // ALWAYS persist IPFS content (it's immutable)
+          if (Array.isArray(queryKey) && queryKey[0] === 'ipfs') {
+            return true;
+          }
+
+          // For other queries, only persist if updated within last 2 hours
+          const isOld = Date.now() - state.dataUpdatedAt > 2 * 60 * 60 * 1000;
           return !isOld;
         },
       },
