@@ -4,9 +4,9 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAccount, useWalletClient, useSwitchChain } from 'wagmi';
 import { type Address } from 'viem';
 import { toast } from 'sonner';
-import { QCIClient, type QCIContent } from "../services/qciClient";
-import { getIPFSService } from '../services/getIPFSService';
-import { IPFSService } from '../services/ipfsService';
+import { type QCIContent } from "../services/qciClient";
+import { useCreateQCI } from '../hooks/useCreateQCI';
+import { useUpdateQCI } from '../hooks/useUpdateQCI';
 import { config } from '../config/env';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -96,10 +96,11 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
   const [transactions, setTransactions] = useState<TransactionData[]>([]);
   const [editingTransactionIndex, setEditingTransactionIndex] = useState<number | null>(null);
 
-  // Services
-  const [qciClient, setQipClient] = useState<QCIClient | null>(null);
-  const [ipfsService, setIpfsService] = useState<IPFSService | null>(null);
   const queryClient = useQueryClient();
+
+  // Initialize mutation hooks
+  const createQCIMutation = useCreateQCI({ registryAddress });
+  const updateQCIMutation = useUpdateQCI({ registryAddress });
 
   // Add a safety timeout to clear saving state if it gets stuck
   useEffect(() => {
@@ -116,22 +117,6 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
     }
   }, [saving, success, error]);
 
-  useEffect(() => {
-    if (registryAddress) {
-      const client = new QCIClient(registryAddress, rpcUrl || config.baseRpcUrl);
-      setQipClient(client);
-    }
-
-    // Use centralized IPFS service selection
-    try {
-      const service = getIPFSService();
-      setIpfsService(service);
-    } catch (error) {
-      console.error("Failed to initialize IPFS service:", error);
-      // Service will remain null, and the component will show the error state
-    }
-  }, [registryAddress, walletClient, rpcUrl]);
-
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
@@ -139,9 +124,8 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
       // Reset navigation flag for new submission
       hasNavigatedRef.current = false;
 
-      if (!qciClient || !ipfsService || !address || !walletClient) {
+      if (!address) {
         setError("Please connect your wallet");
-        console.error("Missing required services:", { qciClient: !!qciClient, ipfsService: !!ipfsService, address });
         return;
       }
 
@@ -151,141 +135,57 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
 
       try {
         // Create QCI content object
-        // For existing QCIs, preserve certain blockchain fields (source of truth)
         const qciContent: QCIContent = {
-          qci: existingQCI?.qciNumber ? Number(existingQCI.qciNumber) : 0, // Will be assigned by contract
+          qci: existingQCI?.qciNumber ? Number(existingQCI.qciNumber) : 0,
           title,
-          chain: combooxSelectedChain, // Allow updating in IPFS content
-          // Preserve critical blockchain fields for existing QCIs
+          chain: combooxSelectedChain,
           status: existingQCI ? existingQCI.content.status : "Draft",
           author: author,
-          implementor, // Allow updating in IPFS content
+          implementor,
           "implementation-date": existingQCI ? existingQCI.content["implementation-date"] : "None",
           proposal: existingQCI ? existingQCI.content.proposal : "None",
-          created: existingQCI ? existingQCI.content.created : new Date().toISOString().split("T")[0], // Preserve original creation date
+          created: existingQCI ? existingQCI.content.created : new Date().toISOString().split("T")[0],
           content,
           transactions: transactions.length > 0 ? transactions.map((tx) => ABIParser.formatTransaction(tx)) : undefined,
         };
 
-        // Format the full content for IPFS
-        const fullContent = ipfsService.formatQCIContent(qciContent);
-
-        // Step 1: Pre-calculate IPFS CID without uploading
-        const expectedCID = await ipfsService.calculateCID(fullContent);
-        const expectedIpfsUrl = `ipfs://${expectedCID}`;
-
-        // Step 2: Calculate content hash for blockchain
-        const contentHash = ipfsService.calculateContentHash(qciContent);
-
-        let qciNumber: bigint;
-        let txHash: string;
-
+        let result;
         if (existingQCI) {
           // Update existing QCI
-          try {
-            txHash = await qciClient.updateQCI({
-              walletClient,
-              qciNumber: existingQCI.qciNumber,
-              title,
-              chain: combooxSelectedChain,
-              implementor,
-              newContentHash: contentHash,
-              newIpfsUrl: expectedIpfsUrl,
-              changeNote: "Updated via web interface",
-            });
-            qciNumber = existingQCI.qciNumber;
-          } catch (updateError) {
-            console.error("QCI update failed:", updateError);
-            throw updateError;
-          }
+          result = await updateQCIMutation.mutateAsync({
+            qciNumber: existingQCI.qciNumber,
+            content: qciContent,
+          });
         } else {
           // Create new QCI
-          const result = await qciClient.createQCI(walletClient, title, combooxSelectedChain, contentHash, expectedIpfsUrl);
-          txHash = result.hash;
-          qciNumber = result.qciNumber;
-        }
-
-        // Step 3: Upload to IPFS with proper metadata AFTER blockchain confirmation
-        let actualCID;
-        try {
-          actualCID = await ipfsService.provider.upload(fullContent, {
-            qciNumber: qciNumber > 0 ? qciNumber.toString() : "pending",
-            groupId: config.pinataGroupId,
-          });
-        } catch (ipfsError) {
-          console.error("IPFS upload failed:", ipfsError);
-          // Don't throw here - blockchain update succeeded
-          // Set actualCID to expectedCID as fallback
-          actualCID = expectedCID;
-          console.warn("Using expected CID as fallback:", actualCID);
-        }
-
-        // Verify CIDs match
-        if (actualCID !== expectedCID) {
-          console.warn("CID mismatch! Expected:", expectedCID, "Actual:", actualCID);
-        }
-
-        // Invalidate caches immediately after successful update
-        if (existingQCI) {
-          // Invalidate all related caches for the updated QCI
-          const qciNum = Number(qciNumber);
-
-          // Get current data to find IPFS URL
-          const currentData = queryClient.getQueryData<any>(["qci", qciNum, registryAddress]);
-
-          // Invalidate QCI query
-          queryClient.invalidateQueries({
-            queryKey: ["qci", qciNum, registryAddress],
-          });
-
-          // Invalidate blockchain cache
-          queryClient.invalidateQueries({
-            queryKey: ["qci-blockchain", qciNum, registryAddress],
-          });
-
-          // Invalidate old IPFS content if exists
-          if (currentData?.ipfsUrl) {
-            queryClient.invalidateQueries({
-              queryKey: ["ipfs", currentData.ipfsUrl],
-            });
-          }
-
-          // Also invalidate the new IPFS URL
-          queryClient.invalidateQueries({
-            queryKey: ["ipfs", `ipfs://${actualCID}`],
+          result = await createQCIMutation.mutateAsync({
+            content: qciContent,
           });
         }
 
-        // Invalidate list to refresh AllProposals
-        queryClient.invalidateQueries({ queryKey: ["qcis"] });
+        const { qciNumber, transactionHash: txHash } = result;
 
         // Show success toast and navigate (prevent multiple navigations)
         if (!hasNavigatedRef.current) {
           if (existingQCI) {
             toast.success(`QCI updated successfully!`);
-            // Mark as navigated before actually navigating
             hasNavigatedRef.current = true;
-            // Navigate back to the QCI detail page with transaction hash
-            // Include timestamp to ensure fresh data fetch
             navigate(`/qcis/${qciNumber}`, {
               state: {
                 txHash,
                 justUpdated: true,
-                timestamp: Date.now(), // Force refresh with timestamp
+                timestamp: Date.now(),
               },
             });
           } else {
-            // For new QCI, show success and reset form
             if (qciNumber > 0) {
               toast.success(`QCI created successfully!`);
-              // Mark as navigated before actually navigating
               hasNavigatedRef.current = true;
-              // Navigate to the new QCI page
               navigate(`/qcis/${qciNumber}`, {
                 state: {
                   txHash,
                   justCreated: true,
-                  timestamp: Date.now(), // Force refresh with timestamp
+                  timestamp: Date.now(),
                 },
               });
             } else {
@@ -304,19 +204,16 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
       } catch (err: any) {
         console.error("Error saving QCI:", err);
 
-        // Provide more helpful error messages
         let errorMessage = err.message || "Failed to save QCI";
-
         if (errorMessage.includes("Content already exists")) {
           errorMessage = "A QCI with identical content already exists. Please modify your proposal content to make it unique.";
         }
-
         setError(errorMessage);
       } finally {
         setSaving(false);
       }
     },
-    [qciClient, ipfsService, address, walletClient, title, combooxSelectedChain, content, implementor, existingQCI, transactions]
+    [address, title, combooxSelectedChain, content, implementor, existingQCI, transactions, author, createQCIMutation, updateQCIMutation, navigate]
   );
 
   const handlePreview = () => {
@@ -357,14 +254,6 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
     return (
       <Alert variant="destructive">
         <AlertDescription>Error: Registry address not configured. Please restart Gatsby to load environment variables.</AlertDescription>
-      </Alert>
-    );
-  }
-
-  if (!ipfsService) {
-    return (
-      <Alert variant="destructive">
-        <AlertDescription>Error: IPFS provider not configured. Please check your environment configuration.</AlertDescription>
       </Alert>
     );
   }

@@ -1,9 +1,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useWalletClient } from 'wagmi';
-import { QCIClient, QCIStatus } from '../services/qciClient';
+import { useWriteContract, useWaitForTransactionReceipt, usePublicClient } from 'wagmi';
+import { QCIStatus } from '../services/qciClient';
+import { STATUS_ENUM_TO_NAME } from '../config/statusConfig';
 import { toast } from 'react-hot-toast';
 import type { Hash } from 'viem';
 import { config } from '../config/env';
+import { QCIRegistryABI } from '../config/abis/QCIRegistry';
 
 interface StatusUpdateParams {
   qciNumber: bigint;
@@ -17,8 +19,9 @@ interface StatusUpdateParams {
  * Properly integrates with React Query's caching strategy
  */
 export function useStatusUpdateMutation() {
-  const { data: walletClient } = useWalletClient();
+  const { writeContractAsync } = useWriteContract();
   const queryClient = useQueryClient();
+  const publicClient = usePublicClient();
 
   return useMutation<Hash, Error, StatusUpdateParams>({
     retry: (failureCount, error) => {
@@ -30,30 +33,23 @@ export function useStatusUpdateMutation() {
       }
       return failureCount < 2;
     },
-    mutationFn: async ({ qciNumber, newStatus, registryAddress, rpcUrl }) => {
-      if (!walletClient) {
-        throw new Error("Please connect your wallet");
+    mutationFn: async ({ qciNumber, newStatus, registryAddress }) => {
+      // Convert enum to string status name if needed
+      let statusString: string;
+      if (typeof newStatus === "string") {
+        statusString = newStatus;
+      } else {
+        statusString = STATUS_ENUM_TO_NAME[newStatus as QCIStatus] ?? "Draft";
       }
 
-      const qciClient = new QCIClient(registryAddress, rpcUrl, false);
-
-      let hash: Hash;
-      try {
-        hash = await qciClient.updateQCIStatus(walletClient, qciNumber, newStatus);
-      } catch (error) {
-        throw error;
-      }
+      const hash = await writeContractAsync({
+        address: registryAddress,
+        abi: QCIRegistryABI,
+        functionName: 'updateStatus',
+        args: [qciNumber, statusString],
+      });
 
       // Wait for transaction confirmation
-      const publicClient = walletClient.chain
-        ? await import("viem").then((m) =>
-            m.createPublicClient({
-              chain: walletClient.chain,
-              transport: m.http(rpcUrl || import.meta.env.VITE_BASE_RPC_URL),
-            })
-          )
-        : null;
-
       if (publicClient) {
         await publicClient.waitForTransactionReceipt({
           hash,

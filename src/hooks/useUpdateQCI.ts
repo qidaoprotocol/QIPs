@@ -1,9 +1,11 @@
 import { useMutation, useQueryClient, UseMutationOptions } from '@tanstack/react-query';
-import { useWalletClient } from 'wagmi';
-import { QCIClient, type QCIContent, QCIStatus } from '../services/qciClient';
-import { IPFSService } from '../services/ipfsService';
+import { useWriteContract, usePublicClient, useReadContract } from 'wagmi';
+import { type QCIContent, QCIStatus } from '../services/qciClient';
+import { STATUS_ENUM_TO_NAME } from '../config/statusConfig';
 import { getIPFSService } from '../services/getIPFSService';
 import { config } from '../config/env';
+import { QCIRegistryABI } from '../config/abis/QCIRegistry';
+import type { Hash } from 'viem';
 
 interface UpdateQCIParams {
   qciNumber: bigint;
@@ -30,20 +32,15 @@ export function useUpdateQCI({
   registryAddress,
   mutationOptions = {},
 }: UseUpdateQCIOptions) {
-  const { data: walletClient } = useWalletClient();
+  const { writeContractAsync } = useWriteContract();
   const queryClient = useQueryClient();
+  const publicClient = usePublicClient();
 
-  const qciClient = new QCIClient(registryAddress, config.baseRpcUrl, false);
-  
   // Use centralized IPFS service selection
   const ipfsService = getIPFSService();
 
   return useMutation<UpdateQCIResult, Error, UpdateQCIParams>({
     mutationFn: async ({ qciNumber, content, newStatus }) => {
-      if (!walletClient) {
-        throw new Error('Wallet not connected');
-      }
-
       try {
         // Ensure content has qci number set
         const qciContent: QCIContent = {
@@ -61,15 +58,18 @@ export function useUpdateQCI({
         // Step 2: Calculate content hash for blockchain
         const contentHash = ipfsService.calculateContentHash(qciContent);
 
-        const txHash = await qciClient.updateQCI({
-          walletClient,
-          qciNumber,
-          title: content.title,
-          chain: content.chain,
-          implementor: content.implementor,
-          newContentHash: contentHash,
-          newIpfsUrl: expectedIpfsUrl,
-          changeNote: "Updated via web interface",
+        // Step 3: Update QCI on blockchain
+        const txHash = await writeContractAsync({
+          address: registryAddress,
+          abi: QCIRegistryABI,
+          functionName: 'updateQCI',
+          args: [qciNumber, content.title, content.chain, content.implementor, contentHash, expectedIpfsUrl, "Updated via web interface"],
+        });
+
+        // Wait for transaction confirmation
+        await publicClient?.waitForTransactionReceipt({
+          hash: txHash,
+          confirmations: 1,
         });
 
         // Step 4: Upload to IPFS with proper metadata AFTER blockchain confirmation
@@ -84,21 +84,39 @@ export function useUpdateQCI({
         }
 
         // Update status if provided
-        if (newStatus !== undefined) {
+        if (newStatus !== undefined && publicClient) {
           // Get current QCI to check status
-          const currentQCI = await qciClient.getQCI(qciNumber);
-          if (newStatus !== currentQCI.status) {
-            await qciClient.updateQCIStatus(walletClient, qciNumber, newStatus);
+          const currentQCI = await publicClient.readContract({
+            address: registryAddress,
+            abi: QCIRegistryABI,
+            functionName: 'qcis',
+            args: [qciNumber],
+          }) as any;
+
+          const currentStatus = currentQCI[8]; // status is at index 8
+          if (newStatus !== currentStatus) {
+            const statusString = STATUS_ENUM_TO_NAME[newStatus as QCIStatus] ?? "Draft";
+            await writeContractAsync({
+              address: registryAddress,
+              abi: QCIRegistryABI,
+              functionName: 'updateStatus',
+              args: [qciNumber, statusString],
+            });
           }
         }
 
         // Get updated QCI data for version
-        const updatedQCI = await qciClient.getQCI(qciNumber);
+        const updatedQCI = await publicClient?.readContract({
+          address: registryAddress,
+          abi: QCIRegistryABI,
+          functionName: 'qcis',
+          args: [qciNumber],
+        }) as any;
 
         return {
           qciNumber,
           ipfsUrl: expectedIpfsUrl,
-          version: updatedQCI.version,
+          version: updatedQCI[12], // version is at index 12
           transactionHash: txHash,
         };
       } catch (error) {

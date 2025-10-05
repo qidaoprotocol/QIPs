@@ -5,8 +5,7 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { AlertCircle, CheckCircle2, Edit3, Loader2 } from "lucide-react";
-import { useWalletClient, usePublicClient } from "wagmi";
-import { QCIRegistryABI } from "../config/abis/QCIRegistry";
+import { useUpdateSnapshotProposal } from "../hooks/useUpdateSnapshotProposal";
 import { toast } from "sonner";
 
 interface SnapshotModeratorProps {
@@ -28,15 +27,11 @@ const SnapshotModerator: React.FC<SnapshotModeratorProps> = ({
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const { data: walletClient } = useWalletClient();
-  const publicClient = usePublicClient();
+  const updateSnapshotMutation = useUpdateSnapshotProposal({
+    registryAddress,
+  });
 
   const handleUpdate = async () => {
-    if (!walletClient || !publicClient) {
-      setError("Wallet not connected");
-      return;
-    }
-
     if (!newProposalId.trim()) {
       setError("Please enter a new Snapshot proposal ID");
       return;
@@ -56,53 +51,25 @@ const SnapshotModerator: React.FC<SnapshotModeratorProps> = ({
     setError(null);
 
     try {
-      // Estimate gas for the transaction
-      const estimatedGas = await publicClient.estimateContractGas({
-        address: registryAddress,
-        abi: QCIRegistryABI,
-        functionName: "updateSnapshotProposal",
-        args: [BigInt(qciNumber), newProposalId, reason],
-        account: walletClient.account,
+      // Use the mutation hook to update the snapshot proposal
+      await updateSnapshotMutation.mutateAsync({
+        qciNumber: BigInt(qciNumber),
+        newProposalId,
+        reason,
       });
 
-      // Add 20% buffer to gas estimate
-      const gasWithBuffer = (estimatedGas * 120n) / 100n;
-
-      // Simulate the transaction
-      const { request } = await publicClient.simulateContract({
-        address: registryAddress,
-        abi: QCIRegistryABI,
-        functionName: "updateSnapshotProposal",
-        args: [BigInt(qciNumber), newProposalId, reason],
-        account: walletClient.account,
-        gas: gasWithBuffer,
+      toast.success("Snapshot proposal updated successfully", {
+        description: `Updated from ${currentProposalId} to ${newProposalId}`,
       });
 
-      // Execute the transaction
-      const hash = await walletClient.writeContract(request);
+      // Reset form
+      setShowForm(false);
+      setNewProposalId("");
+      setReason("");
 
-      // Wait for confirmation
-      const receipt = await publicClient.waitForTransactionReceipt({
-        hash,
-        confirmations: 1,
-      });
-
-      if (receipt.status === "success") {
-        toast.success("Snapshot proposal updated successfully", {
-          description: `Updated from ${currentProposalId} to ${newProposalId}`,
-        });
-
-        // Reset form
-        setShowForm(false);
-        setNewProposalId("");
-        setReason("");
-
-        // Call success callback
-        if (onSuccess) {
-          onSuccess();
-        }
-      } else {
-        throw new Error("Transaction failed");
+      // Call success callback
+      if (onSuccess) {
+        onSuccess();
       }
     } catch (error: any) {
       console.error("Failed to update Snapshot proposal:", error);

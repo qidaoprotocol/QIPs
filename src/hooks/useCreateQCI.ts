@@ -1,9 +1,10 @@
 import { useMutation, useQueryClient, UseMutationOptions } from '@tanstack/react-query';
-import { useWalletClient } from 'wagmi';
-import { QCIClient, type QCIContent } from '../services/qciClient';
-import { IPFSService } from '../services/ipfsService';
+import { useWriteContract, usePublicClient } from 'wagmi';
+import { type QCIContent } from '../services/qciClient';
 import { getIPFSService } from '../services/getIPFSService';
 import { config } from '../config/env';
+import { QCIRegistryABI } from '../config/abis/QCIRegistry';
+import type { Hash } from 'viem';
 
 interface CreateQCIParams {
   content: QCIContent;
@@ -27,54 +28,56 @@ export function useCreateQCI({
   registryAddress,
   mutationOptions = {},
 }: UseCreateQCIOptions) {
-  const { data: walletClient } = useWalletClient();
+  const { writeContractAsync } = useWriteContract();
   const queryClient = useQueryClient();
+  const publicClient = usePublicClient();
 
-  const qciClient = new QCIClient(registryAddress, config.baseRpcUrl, false);
-  
   // Use centralized IPFS service selection
   const ipfsService = getIPFSService();
 
   return useMutation<CreateQCIResult, Error, CreateQCIParams>({
     mutationFn: async ({ content }) => {
-      if (!walletClient) {
-        throw new Error('Wallet not connected');
-      }
-
-
       try {
         // Format the full content for IPFS
         const fullContent = ipfsService.formatQCIContent(content);
-        
+
         // Step 1: Pre-calculate IPFS CID without uploading
         console.log('🔮 Calculating IPFS CID...');
         const expectedCID = await ipfsService.calculateCID(fullContent);
         const expectedIpfsUrl = `ipfs://${expectedCID}`;
         console.log('✅ Expected CID:', expectedCID);
-        
+
         // Step 2: Calculate content hash for blockchain
         const contentHash = ipfsService.calculateContentHash(content);
 
         // Step 3: Create QCI on blockchain with pre-calculated IPFS URL
         console.log('🚀 Creating new QCI on blockchain...');
-        const result = await qciClient.createQCI(
-          walletClient,
-          content.title,
-          content.chain,
-          contentHash,
-          expectedIpfsUrl
-        );
-        const txHash = result.hash;
-        const qciNumber = result.qciNumber;
-        console.log('✅ QCI created on blockchain:', { txHash, qciNumber });
-        
+        const txHash = await writeContractAsync({
+          address: registryAddress,
+          abi: QCIRegistryABI,
+          functionName: 'createQCI',
+          args: [content.title, content.chain, contentHash, expectedIpfsUrl],
+        });
+        console.log('✅ QCI created on blockchain:', { txHash });
+
+        // Wait for transaction receipt to get QCI number
+        const receipt = await publicClient?.waitForTransactionReceipt({
+          hash: txHash,
+          confirmations: 1,
+        });
+
+        // Decode QCI number from event logs
+        const log = receipt?.logs.find((log) => log.address.toLowerCase() === registryAddress.toLowerCase());
+        const qciNumber = log?.topics[1] ? BigInt(log.topics[1]) : BigInt(0);
+        console.log('✅ QCI number:', qciNumber);
+
         // Step 4: Upload to IPFS with proper metadata AFTER blockchain confirmation
         console.log('📤 Uploading to IPFS with metadata...');
         const actualCID = await ipfsService.provider.upload(fullContent, {
           qciNumber: qciNumber > 0 ? qciNumber.toString() : 'pending',
           groupId: config.pinataGroupId
         });
-        
+
         // Verify CIDs match
         if (actualCID !== expectedCID) {
           console.warn('⚠️ CID mismatch! Expected:', expectedCID, 'Actual:', actualCID);

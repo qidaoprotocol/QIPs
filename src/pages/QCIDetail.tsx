@@ -3,14 +3,14 @@ import { useParams, Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAccount } from 'wagmi'
 import { toast } from 'sonner'
 import { useQCI } from '../hooks/useQCI'
+import { useCheckRoles } from '../hooks/useCheckRoles'
 import { useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '../utils/queryKeys'
 import FrontmatterTable from '../components/FrontmatterTable'
 import SnapshotSubmitter from "../components/SnapshotSubmitter";
 import { QCISkeleton } from '../components/QCISkeleton'
 import { QCIRegistryABI } from "../config/abis/QCIRegistry";
-import { QCIStatus, QCIClient } from '../services/qciClient'
-import { useMemo } from 'react'
+import { QCIStatus } from '../services/qciClient'
 import { getIPFSGatewayUrl } from '../utils/ipfsGateway'
 import { MarkdownExportButton } from '../components/MarkdownExportButton'
 import { ExportMenu } from '../components/ExportMenu'
@@ -37,8 +37,6 @@ const QCIDetail: React.FC = () => {
   // Use ref to track if we've already shown the toast for this transaction
   const toastShownRef = useRef<string | null>(null)
 
-  // Cache for role checks to avoid repeated contract calls
-  const [roleCache] = useState<Map<string, boolean>>(new Map())
   const queryClient = useQueryClient()
 
   // Extract number from QCI-XXX format
@@ -54,6 +52,13 @@ const QCIDetail: React.FC = () => {
     qciNumber: parseInt(qciNumberParsed),
     rpcUrl,
     enabled: !!registryAddress && !!qciNumber
+  })
+
+  // Check roles using WAGMI hook
+  const { isEditor: hasEditorRole, isAdmin: hasAdminRole, hasAnyRole } = useCheckRoles({
+    address,
+    registryAddress,
+    enabled: !!address && !!registryAddress,
   })
 
   // Clear stale cache on mount to ensure fresh data
@@ -185,104 +190,35 @@ const QCIDetail: React.FC = () => {
     }
   }, [location.state?.timestamp]) // Only run when timestamp changes
 
-  // Create a memoized QCIClient instance to avoid recreating it
-  const qciClient = useMemo(() => {
-    if (!registryAddress) return null
-    return new QCIClient(registryAddress, rpcUrl, false)
-  }, [registryAddress, rpcUrl])
-
   useEffect(() => {
     setIsClient(true)
   }, [])
 
+  // Update permissions based on role check results and author status
   useEffect(() => {
-    // Debounce timer to prevent rapid re-checks
-    let timeoutId: NodeJS.Timeout
-
-    const checkPermissions = async () => {
-      console.log('[QCIDetail] Permission check - address:', address, 'qciData:', !!qciData, 'qciClient:', !!qciClient);
-
-      if (!address || !qciData || !qciClient) {
-        setCanEdit(false)
-        setCanSubmitSnapshot(false)
-        return
-      }
-
-      // Check if user is author
-      const authorCheck = qciData.author.toLowerCase() === address.toLowerCase()
-      setIsAuthor(authorCheck)
-      
-      // Check if user has editor or admin role using the load-balanced client
-      let editorCheck = false
-
-      // Check cache first
-      const cacheKey = `${address}-roles`
-      // Force fresh check - skip cache for debugging
-      const skipCache = true;
-
-      if (!skipCache && roleCache.has(cacheKey)) {
-        editorCheck = roleCache.get(cacheKey) || false
-        console.log('[QCIDetail] Using cached role:', editorCheck);
-      } else {
-        console.log('[QCIDetail] Making fresh role check for address:', address);
-        try {
-          // Use the QCIClient's public client which has load balancing
-          const publicClient = qciClient.getPublicClient()
-
-          // Batch both role checks together to reduce RPC calls
-          const DEFAULT_ADMIN_ROLE = '0x0000000000000000000000000000000000000000000000000000000000000000'
-
-          // Get EDITOR_ROLE constant first
-          const editorRoleResult = await publicClient.readContract({
-            address: registryAddress,
-            abi: QCIRegistryABI,
-            functionName: 'EDITOR_ROLE'
-          })
-
-          console.log('[QCIDetail] EDITOR_ROLE hash:', editorRoleResult);
-
-          // Then batch the hasRole checks
-          const [hasEditorRole, hasAdminRole] = await Promise.all([
-            publicClient.readContract({
-              address: registryAddress,
-              abi: QCIRegistryABI,
-              functionName: 'hasRole',
-              args: [editorRoleResult, address]
-            }),
-            publicClient.readContract({
-              address: registryAddress,
-              abi: QCIRegistryABI,
-              functionName: 'hasRole',
-              args: [DEFAULT_ADMIN_ROLE, address]
-            })
-          ])
-
-          console.log('[QCIDetail] Role check results - hasEditorRole:', hasEditorRole, 'hasAdminRole:', hasAdminRole);
-
-          editorCheck = (hasEditorRole || hasAdminRole) as boolean
-          // Cache the result
-          roleCache.set(cacheKey, editorCheck)
-
-          if (editorCheck) {
-            console.log(`User ${address} has ${hasAdminRole ? 'admin' : 'editor'} role`)
-          }
-        } catch (error) {
-          console.error('Error checking roles:', error)
-        }
-      }
-      setIsEditor(editorCheck)
-
-      console.log('[QCIDetail] Final permissions - authorCheck:', authorCheck, 'editorCheck:', editorCheck);
-      setCanEdit(authorCheck || editorCheck)
-      // Anyone with a connected wallet can submit to snapshot
-      setCanSubmitSnapshot(!!address)
+    if (!address || !qciData) {
+      setCanEdit(false)
+      setCanSubmitSnapshot(false)
+      setIsAuthor(false)
+      setIsEditor(false)
+      return
     }
 
-    // Debounce the check to avoid rapid re-execution
-    timeoutId = setTimeout(checkPermissions, 300)
-    
-    return () => clearTimeout(timeoutId)
-  }, [address, qciData, qciClient, registryAddress])
+    // Check if user is author
+    const authorCheck = qciData.author.toLowerCase() === address.toLowerCase()
+    setIsAuthor(authorCheck)
+
+    // Set editor status from hook
+    setIsEditor(hasAnyRole)
+
+    // Can edit if author OR has editor/admin role
+    setCanEdit(authorCheck || hasAnyRole)
+
+    // Anyone with a connected wallet can submit to snapshot
+    setCanSubmitSnapshot(!!address)
+
+    console.log('[QCIDetail] Permissions updated - isAuthor:', authorCheck, 'hasRole:', hasAnyRole, 'canEdit:', authorCheck || hasAnyRole)
+  }, [address, qciData, hasAnyRole])
 
   if (loading) {
     return (
