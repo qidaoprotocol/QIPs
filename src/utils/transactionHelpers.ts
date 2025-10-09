@@ -6,12 +6,20 @@ import type { MultisigTransactionGroup } from './transactionParser';
 export const CHAIN_EXPLORERS: Record<string, string> = {
   'Ethereum': 'https://etherscan.io/address/',
   'Polygon': 'https://polygonscan.com/address/',
+  'Polygon PoS': 'https://polygonscan.com/address/',
   'Base': 'https://basescan.org/address/',
   'Arbitrum': 'https://arbiscan.io/address/',
   'Optimism': 'https://optimistic.etherscan.io/address/',
   'BSC': 'https://bscscan.com/address/',
+  'BNB': 'https://bscscan.com/address/',
+  'Binance': 'https://bscscan.com/address/',
   'Avalanche': 'https://snowtrace.io/address/',
-  'Metis': 'https://andromeda-explorer.metis.io/address/'
+  'Metis': 'https://andromeda-explorer.metis.io/address/',
+  'Gnosis': 'https://gnosisscan.io/address/',
+  'Gnosis Chain': 'https://gnosisscan.io/address/',
+  'Linea': 'https://lineascan.build/address/',
+  'Polygon zkEVM': 'https://zkevm.polygonscan.com/address/',
+  'Kava': 'https://kavascan.com/address/'
 };
 
 /**
