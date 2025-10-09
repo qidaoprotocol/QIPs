@@ -17,6 +17,8 @@ export interface TransactionData {
   functionName: string;
   args: any[];
   abi: Abi;
+  annotation?: string;
+  multisig?: string;
 }
 
 export class ABIParser {
@@ -202,16 +204,18 @@ export class ABIParser {
     const chainId = chainIdMap[data.chain] || data.chain;
 
     // Create a structured transaction object (ABI is NOT stored to keep size small)
-    const transaction = {
+    const transaction: Record<string, any> = {
       chainId: chainId,
       to: data.contractAddress,
       function: data.functionName,
       args: data.args,
       value: "0", // Default to 0, can be extended later
-      // Additional fields can be added here in the future:
-      // gasLimit: 100000,
-      // description: "Transaction description"
     };
+
+    // Add optional annotation if provided
+    if (data.annotation) {
+      transaction.annotation = data.annotation;
+    }
 
     return JSON.stringify(transaction, null, 2);
   }
@@ -268,7 +272,8 @@ export class ABIParser {
           contractAddress: parsed.to || parsed.address || parsed.contractAddress,
           functionName: parsed.function || parsed.functionName,
           args: parsed.args || [],
-          abi: [] // ABI is not stored, will be fetched on edit
+          abi: [], // ABI is not stored, will be fetched on edit
+          annotation: parsed.annotation, // Include annotation if present
         };
       }
     } catch {
