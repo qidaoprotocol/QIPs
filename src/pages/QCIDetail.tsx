@@ -18,6 +18,7 @@ import { Edit } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { SnapshotStatus } from '../components/SnapshotStatus'
 import SnapshotModerator from "../components/SnapshotModerator";
+import { useQIPNumber } from '../hooks/useQIPNumber'
 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -57,6 +58,9 @@ const QCIDetail: React.FC = () => {
     rpcUrl,
     enabled: !!registryAddress && !!qciNumber
   })
+
+  // Get QIP number if this QCI has been posted to Snapshot
+  const { qipNumber, hasSnapshot } = useQIPNumber(qciData?.proposal)
 
   // Check roles using WAGMI hook
   const { isEditor: hasEditorRole, isAdmin: hasAdminRole, hasAnyRole } = useCheckRoles({
@@ -312,6 +316,14 @@ const QCIDetail: React.FC = () => {
               </Button>
             )}
           </div>
+        </div>
+
+        <div className="mb-2 text-sm font-medium text-muted-foreground">
+          {hasSnapshot && qipNumber ? (
+            <span>QIP {qipNumber}</span>
+          ) : (
+            <span>QCI {qciData.qciNumber}</span>
+          )}
         </div>
 
         <h1 className="text-4xl font-bold mb-4">{qciData.title}</h1>

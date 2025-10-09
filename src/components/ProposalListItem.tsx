@@ -9,8 +9,20 @@ import { CACHE_TIMES } from '../config/queryClient';
 import { Card, CardHeader, CardContent, CardTitle, CardDescription } from '@/components/ui/card';
 import { SnapshotStatus } from './SnapshotStatus';
 import { StatusBadge } from "@/components/ui/status-badge";
+import { useQIPNumber } from '../hooks/useQIPNumber';
 
 // Use shared StatusBadge for consistent styling across the app
+
+// Component to display QCI or QIP label
+const ProposalLabel: React.FC<{ qciNumber: number; snapshotProposalId: string | null }> = ({ qciNumber, snapshotProposalId }) => {
+  const { qipNumber, hasSnapshot } = useQIPNumber(snapshotProposalId);
+
+  if (hasSnapshot && qipNumber) {
+    return <span>QIP {qipNumber}</span>;
+  }
+
+  return <span>QCI {qciNumber}</span>;
+};
 
 const ProposalListItem = (props: any) => {
   const { proposals } = props;
@@ -163,7 +175,10 @@ const ProposalListItem = (props: any) => {
             <Link to={`/qcis/${data.qci}`} className="block" onMouseEnter={() => handleMouseEnter(data.qci)}>
               <CardHeader>
                 <div className="flex items-center justify-between mb-2">
-                  <CardDescription className="text-sm font-medium">QCI - {data.created && `${formatDate(data.created)}`}</CardDescription>
+                  <CardDescription className="text-sm font-medium">
+                    <ProposalLabel qciNumber={data.qci} snapshotProposalId={data.snapshotProposalId} />
+                    {data.created && ` - ${formatDate(data.created)}`}
+                  </CardDescription>
                   <div className="flex items-center gap-2">
                     {data.snapshotProposalId ? (
                       <SnapshotStatus proposalIdOrUrl={data.snapshotProposalId} showVotes={false} compact={true} />
