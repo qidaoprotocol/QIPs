@@ -440,6 +440,7 @@ const QCIDetail: React.FC = () => {
               mode="view"
               defaultOpen={true}
               showCopyButtons={true}
+              heading="Proposal Payload (PP)"
             />
           </div>
         )}

@@ -19,6 +19,7 @@ interface TransactionGroupProps {
   defaultOpen?: boolean;
   showCopyButtons?: boolean;
   className?: string;
+  heading?: string;
 }
 
 export const TransactionGroup: React.FC<TransactionGroupProps> = ({
@@ -28,7 +29,8 @@ export const TransactionGroup: React.FC<TransactionGroupProps> = ({
   onDelete,
   defaultOpen = mode === 'view',
   showCopyButtons = mode === 'view',
-  className = ''
+  className = '',
+  heading = 'Transactions'
 }) => {
   const [openGroups, setOpenGroups] = React.useState<Record<number, boolean>>({});
   const [openTxStrings, setOpenTxStrings] = React.useState<Record<string, boolean>>({});
@@ -124,7 +126,7 @@ export const TransactionGroup: React.FC<TransactionGroupProps> = ({
 
   return (
     <div className={`space-y-2 ${className}`}>
-      {mode === 'view' && <h3 className="text-lg font-semibold text-foreground mb-4">Transactions</h3>}
+      {mode === 'view' && <h3 className="text-lg font-semibold text-foreground mb-4">{heading}</h3>}
 
       {transactionGroups.map((group, groupIndex) => (
         <Collapsible
