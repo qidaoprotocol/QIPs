@@ -5,6 +5,7 @@ export type Theme = 'light' | 'dark';
 interface ThemeContextType {
   theme: Theme;
   toggleTheme: () => void;
+  toggleThemeWithTransition: (x: number, y: number) => void;
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
@@ -57,9 +58,27 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   const toggleTheme = () => {
     setTheme(prevTheme => prevTheme === 'light' ? 'dark' : 'light');
   };
-  
+
+  const toggleThemeWithTransition = (x: number, y: number) => {
+    // Check if View Transitions API is supported
+    if (!document.startViewTransition) {
+      // Fallback to regular toggle for unsupported browsers
+      toggleTheme();
+      return;
+    }
+
+    // Set CSS custom properties for the transition origin
+    document.documentElement.style.setProperty('--x', `${x}px`);
+    document.documentElement.style.setProperty('--y', `${y}px`);
+
+    // Start the view transition
+    document.startViewTransition(() => {
+      setTheme(prevTheme => prevTheme === 'light' ? 'dark' : 'light');
+    });
+  };
+
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme }}>
+    <ThemeContext.Provider value={{ theme, toggleTheme, toggleThemeWithTransition }}>
       {children}
     </ThemeContext.Provider>
   );

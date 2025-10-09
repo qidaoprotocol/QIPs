@@ -2,6 +2,26 @@
 @tailwind components;
 @tailwind utilities;
 
+/* View Transitions API - Theme Toggle Animation */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-new(root) {
+  animation: scale-up 700ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes scale-up {
+  from {
+    clip-path: circle(0% at var(--x, 50vw) var(--y, 50vh));
+  }
+  to {
+    clip-path: circle(150% at var(--x, 50vw) var(--y, 50vh));
+  }
+}
+
 
 .markdown-content h2 {
     font-size: 1.5rem;
