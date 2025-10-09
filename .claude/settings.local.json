@@ -47,7 +47,9 @@
       "mcp__context7__resolve-library-id",
       "mcp__context7__get-library-docs",
       "WebFetch(domain:ui.shadcn.com)",
-      "Bash(ipfs cat:*)"
+      "Bash(ipfs cat:*)",
+      "Bash(ast-grep:*)",
+      "WebFetch(domain:docs.etherscan.io)"
     ],
     "deny": [
       "Bash(rm-rf:*)"
