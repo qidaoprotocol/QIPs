@@ -237,13 +237,13 @@ export const TransactionGroup: React.FC<TransactionGroupProps> = ({
                               target="_blank"
                               rel="noopener noreferrer"
                               title="View contract on block explorer"
-                              className="inline-flex items-center gap-1 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors"
+                              className="inline-flex items-center gap-1 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors border-b border-dashed border-muted-foreground/40 hover:border-foreground/40"
                             >
                               <span>{tx.contractAddress}</span>
                               <ExternalLink size={12} />
                             </a>
                           ) : (
-                            <code className="text-xs font-mono text-muted-foreground">
+                            <code className="text-xs font-mono text-muted-foreground border-b border-dashed border-muted-foreground/40">
                               {tx.contractAddress}
                             </code>
                           )}
@@ -285,21 +285,22 @@ export const TransactionGroup: React.FC<TransactionGroupProps> = ({
                             onOpenChange={() => toggleTxString(txId)}
                           >
                             <div className="mt-2 pt-2 border-t border-border/30">
-                              <CollapsibleTrigger asChild>
-                                <div className="flex items-center gap-1 mb-1 cursor-pointer hover:bg-muted/30 rounded p-1 -ml-1">
-                                  {openTxStrings[txId] ? (
-                                    <ChevronDown size={12} className="text-muted-foreground" />
-                                  ) : (
-                                    <ChevronRight size={12} className="text-muted-foreground" />
-                                  )}
-                                  <span className="text-xs text-muted-foreground">Technical Details</span>
-                                </div>
-                              </CollapsibleTrigger>
-                              <CollapsibleContent>
-                                <div className="rounded bg-muted/40 p-3 mt-1">
-                                  <pre className="text-xs font-mono overflow-x-auto mb-2">
-                                    <code>{JSON.stringify(JSON.parse(txString), null, 2)}</code>
-                                  </pre>
+                              <div className="flex items-center justify-between mb-1">
+                                <CollapsibleTrigger asChild>
+                                  <div className="flex items-center gap-1 cursor-pointer hover:bg-muted/30 rounded p-1 -ml-1 flex-1">
+                                    {openTxStrings[txId] ? (
+                                      <ChevronDown size={12} className="text-muted-foreground" />
+                                    ) : (
+                                      <ChevronRight size={12} className="text-muted-foreground" />
+                                    )}
+                                    <span className="text-xs text-muted-foreground">Technical Details</span>
+                                  </div>
+                                </CollapsibleTrigger>
+                                <div
+                                  className={`transition-opacity duration-200 ${
+                                    openTxStrings[txId] ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                                  }`}
+                                >
                                   <Button
                                     onClick={() => handleCopy(txString, txId)}
                                     variant="ghost"
@@ -319,6 +320,13 @@ export const TransactionGroup: React.FC<TransactionGroupProps> = ({
                                       </>
                                     )}
                                   </Button>
+                                </div>
+                              </div>
+                              <CollapsibleContent>
+                                <div className="rounded bg-muted/40 p-3 mt-1">
+                                  <pre className="text-xs font-mono overflow-x-auto">
+                                    <code>{JSON.stringify(JSON.parse(txString), null, 2)}</code>
+                                  </pre>
                                 </div>
                               </CollapsibleContent>
                             </div>
