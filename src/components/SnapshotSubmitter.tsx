@@ -110,12 +110,46 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
     // Build the full body with YAML frontmatter
     let fullBody = yamlFields.join("\n") + "\n\n" + content;
 
-    // Add transactions if present
+    // Add transactions if present - now supporting multisig-grouped format
     if (transactions && transactions.length > 0) {
       fullBody += "\n\n## Transactions\n\n";
-      transactions.forEach((tx, index) => {
-        fullBody += `### Transaction ${index + 1}\n\`\`\`\n${tx}\n\`\`\`\n\n`;
-      });
+
+      try {
+        // Parse the transaction groups (new format) or individual transactions (legacy)
+        const parsed = JSON.parse(transactions[0]);
+
+        // Check if it's the new multisig-grouped format
+        if (Array.isArray(parsed) && parsed.length > 0 && 'multisig' in parsed[0] && 'transactions' in parsed[0]) {
+          // New format: group by multisig
+          parsed.forEach((group: any, groupIndex: number) => {
+            if (group.multisig) {
+              fullBody += `### Multisig: \`${group.multisig}\`\n\n`;
+            }
+
+            group.transactions.forEach((tx: any, txIndex: number) => {
+              const txNum = groupIndex > 0 ? `${groupIndex + 1}.${txIndex + 1}` : `${txIndex + 1}`;
+              fullBody += `**Transaction ${txNum}**`;
+
+              // Add annotation if present
+              if (tx.annotation) {
+                fullBody += `\n\n*${tx.annotation}*`;
+              }
+
+              fullBody += `\n\n\`\`\`json\n${JSON.stringify(tx, null, 2)}\n\`\`\`\n\n`;
+            });
+          });
+        } else if (Array.isArray(parsed)) {
+          // Legacy format: simple array of transactions
+          parsed.forEach((tx: any, index: number) => {
+            fullBody += `### Transaction ${index + 1}\n\`\`\`json\n${JSON.stringify(tx, null, 2)}\n\`\`\`\n\n`;
+          });
+        }
+      } catch (error) {
+        // Fallback: treat as legacy format string array
+        transactions.forEach((tx, index) => {
+          fullBody += `### Transaction ${index + 1}\n\`\`\`\n${tx}\n\`\`\`\n\n`;
+        });
+      }
     }
 
     return fullBody;

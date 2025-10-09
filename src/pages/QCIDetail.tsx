@@ -24,9 +24,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { config } from '../config/env'
 import { extractTransactionsFromMarkdown } from '../utils/transactionParser'
-import { ABIParser } from '../utils/abiParser'
-import { getAddressExplorerUrl } from '../config/blockExplorers'
-import { ExternalLink } from 'lucide-react'
+import { TransactionGroup } from '../components/TransactionGroup'
 
 const QCIDetail: React.FC = () => {
   const { qciNumber } = useParams<{ qciNumber: string }>()
@@ -270,7 +268,18 @@ const QCIDetail: React.FC = () => {
   }
 
   // Extract transactions from content for separate display
-  const { contentWithoutTransactions, transactions } = extractTransactionsFromMarkdown(qciData.content)
+  const { contentWithoutTransactions, transactions: parsedTransactions } = extractTransactionsFromMarkdown(qciData.content)
+
+  // Extract raw transaction JSON for TransactionDisplay component
+  const extractRawTransactions = (content: string): string[] => {
+    const transactionsMatch = content.match(/##\s*Transactions\s*\n+```json\s*\n([\s\S]+?)\n```/);
+    if (transactionsMatch) {
+      return [transactionsMatch[1]]; // Return the raw JSON string
+    }
+    return [];
+  };
+
+  const rawTransactions = extractRawTransactions(qciData.content);
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -424,73 +433,14 @@ const QCIDetail: React.FC = () => {
         </div>
 
         {/* Display transactions if present */}
-        {transactions.length > 0 && (
+        {rawTransactions.length > 0 && (
           <div className="mt-8 border-t pt-8">
-            <h2 className="text-2xl font-bold mb-4">Transactions</h2>
-            <div className="space-y-4">
-              {transactions.map((tx, index) => (
-                <div key={index} className="border rounded-lg p-4 bg-muted/30">
-                  <div className="space-y-2">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <p className="font-semibold text-lg">{tx.functionName}()</p>
-                        <p className="text-sm text-muted-foreground">on {tx.chain}</p>
-                      </div>
-                      <div className="text-xs font-mono text-muted-foreground">
-                        #{index + 1}
-                      </div>
-                    </div>
-
-                    <div className="text-sm">
-                      <span className="font-medium">Contract:</span>{' '}
-                      {(() => {
-                        const explorerUrl = getAddressExplorerUrl(tx.chain, tx.contractAddress);
-
-                        if (explorerUrl) {
-                          return (
-                            <a
-                              href={explorerUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted text-xs font-mono hover:bg-muted/80 transition-colors underline decoration-dotted underline-offset-2"
-                            >
-                              {tx.contractAddress}
-                              <ExternalLink className="h-3 w-3" />
-                            </a>
-                          );
-                        }
-
-                        return (
-                          <code className="px-1.5 py-0.5 rounded bg-muted text-xs">
-                            {tx.contractAddress}
-                          </code>
-                        );
-                      })()}
-                    </div>
-
-                    {tx.args.length > 0 && (
-                      <div className="text-sm">
-                        <span className="font-medium">Arguments:</span>
-                        <pre className="mt-1 p-2 bg-muted rounded text-xs overflow-x-auto">
-                          {JSON.stringify(tx.args, null, 2)}
-                        </pre>
-                      </div>
-                    )}
-
-                    <div className="pt-2 border-t">
-                      <details className="text-xs">
-                        <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-                          View formatted transaction
-                        </summary>
-                        <pre className="mt-2 p-2 bg-muted rounded overflow-x-auto">
-                          {ABIParser.formatTransaction(tx)}
-                        </pre>
-                      </details>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <TransactionGroup
+              transactions={rawTransactions}
+              mode="view"
+              defaultOpen={true}
+              showCopyButtons={true}
+            />
           </div>
         )}
 

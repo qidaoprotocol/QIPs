@@ -15,8 +15,10 @@ import { ChainCombobox } from "./ChainCombobox";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { TransactionFormatter } from "./TransactionFormatter";
+import { TransactionGroup } from "./TransactionGroup";
 import { type TransactionData, ABIParser } from "../utils/abiParser";
-import { Plus, Edit2, Trash2 } from "lucide-react";
+import { groupTransactionsByMultisig } from "../utils/transactionParser";
+import { Plus } from "lucide-react";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -119,13 +121,48 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
         const transactionsMatch = existingQCI.content.content.match(/##\s*Transactions\s*\n+```json\s*\n([\s\S]+?)\n```/);
 
         if (transactionsMatch) {
-          const transactionsJson = JSON.parse(transactionsMatch[1]);
+          let transactionsJson = JSON.parse(transactionsMatch[1]);
+          console.log('[TX_DEBUG] ProposalEditor: Initial parse - is array?', Array.isArray(transactionsJson), 'length:', transactionsJson?.length);
+
+          // Handle double-nested array bug from older versions
+          if (Array.isArray(transactionsJson) && transactionsJson.length === 1 && Array.isArray(transactionsJson[0])) {
+            console.log('[TX_DEBUG] ProposalEditor: Detected double-nested array, unwrapping...');
+            transactionsJson = transactionsJson[0];
+            console.log('[TX_DEBUG] ProposalEditor: After unwrap - length:', transactionsJson.length);
+          }
+
           if (Array.isArray(transactionsJson)) {
-            const parsedTransactions = transactionsJson.map((tx) => {
-              const txString = JSON.stringify(tx);
-              return ABIParser.parseTransaction(txString);
-            });
-            setTransactions(parsedTransactions);
+            // Check if it's the new multisig-grouped format
+            const isNewFormat = transactionsJson.length > 0 &&
+                              'multisig' in transactionsJson[0] &&
+                              'transactions' in transactionsJson[0];
+            console.log('[TX_DEBUG] ProposalEditor: Format detected:', isNewFormat ? 'NEW (multisig-grouped)' : 'LEGACY (flat)');
+
+            if (isNewFormat) {
+              // New format: flatten all transactions from all groups
+              console.log('[TX_DEBUG] ProposalEditor: Processing new format, groups:', transactionsJson.length);
+              const allTransactions: TransactionData[] = [];
+              transactionsJson.forEach((group: any, groupIdx: number) => {
+                console.log(`[TX_DEBUG] ProposalEditor: Group ${groupIdx} - multisig:`, group.multisig, 'transactions:', group.transactions?.length);
+                group.transactions.forEach((tx: any) => {
+                  const parsed = ABIParser.parseTransaction(JSON.stringify(tx));
+                  // Preserve the multisig from the group
+                  parsed.multisig = group.multisig;
+                  allTransactions.push(parsed);
+                });
+              });
+              console.log('[TX_DEBUG] ProposalEditor: Successfully parsed', allTransactions.length, 'transactions');
+              setTransactions(allTransactions);
+            } else {
+              // Legacy format: array of transactions
+              console.log('[TX_DEBUG] ProposalEditor: Processing legacy format, transactions:', transactionsJson.length);
+              const parsedTransactions = transactionsJson.map((tx) => {
+                const txString = JSON.stringify(tx);
+                return ABIParser.parseTransaction(txString);
+              });
+              console.log('[TX_DEBUG] ProposalEditor: Successfully parsed', parsedTransactions.length, 'transactions');
+              setTransactions(parsedTransactions);
+            }
           }
         }
       } catch (error) {
@@ -167,6 +204,31 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
       setSaving(true);
 
       try {
+        console.log('[TX_DEBUG] ProposalEditor: Starting transaction serialization');
+        console.log('[TX_DEBUG] ProposalEditor: Raw transactions array:', transactions);
+
+        // Group transactions by multisig address
+        const transactionGroups = groupTransactionsByMultisig(transactions).map(group => ({
+          multisig: group.multisig,
+          transactions: group.transactions.map((tx) => {
+            // Parse the formatted transaction and add it back
+            const formatted = ABIParser.formatTransaction(tx);
+            return JSON.parse(formatted);
+          }),
+        }));
+
+        console.log('[TX_DEBUG] ProposalEditor: Grouped transactions:', transactionGroups);
+
+        // Serialize transaction groups as strings for QCIContent
+        const serializedTransactions = transactions.length > 0
+          ? [JSON.stringify(transactionGroups, null, 2)]
+          : undefined;
+
+        console.log('[TX_DEBUG] ProposalEditor: Serialized transactions array:', serializedTransactions);
+        if (serializedTransactions) {
+          console.log('[TX_DEBUG] ProposalEditor: Serialized transactions[0] length:', serializedTransactions[0].length);
+        }
+
         // Create QCI content object
         const qciContent: QCIContent = {
           qci: existingQCI?.qciNumber ? Number(existingQCI.qciNumber) : 0,
@@ -179,7 +241,7 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
           proposal: existingQCI ? existingQCI.content.proposal : "None",
           created: existingQCI ? existingQCI.content.created : new Date().toISOString().split("T")[0],
           content,
-          transactions: transactions.length > 0 ? transactions.map((tx) => ABIParser.formatTransaction(tx)) : undefined,
+          transactions: serializedTransactions,
         };
 
         let result;
@@ -393,23 +455,13 @@ Implementation details...`}
           </div>
 
           {transactions.length > 0 ? (
-            <div className="space-y-2 mb-4">
-              {transactions.map((tx, index) => (
-                <div key={index} className="flex items-center justify-between rounded-lg bg-muted/30 p-3">
-                  <div className="flex-1">
-                    <code className="text-sm font-mono break-all">{ABIParser.formatTransaction(tx)}</code>
-                  </div>
-                  <div className="flex gap-2 ml-4">
-                    <Button type="button" onClick={() => handleEditTransaction(index)} variant="ghost" size="icon" className="h-8 w-8">
-                      <Edit2 size={16} className="text-muted-foreground" />
-                    </Button>
-                    <Button type="button" onClick={() => handleDeleteTransaction(index)} variant="ghost" size="icon" className="h-8 w-8">
-                      <Trash2 size={16} className="text-destructive" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <TransactionGroup
+              transactions={transactions}
+              mode="edit"
+              defaultOpen={false}
+              onEdit={handleEditTransaction}
+              onDelete={handleDeleteTransaction}
+            />
           ) : (
             <p className="text-sm text-muted-foreground mb-4">
               No transactions added. Click "Add Transaction" to include on-chain transactions with this proposal.
@@ -447,14 +499,18 @@ Implementation details...`}
                 <pre className="bg-muted/50 p-4 rounded-lg overflow-x-auto">
                   <code className="text-sm font-mono">
                     {JSON.stringify(
-                      transactions.map((tx) => {
-                        const formatted = ABIParser.formatTransaction(tx);
-                        try {
-                          return JSON.parse(formatted);
-                        } catch {
-                          return formatted;
-                        }
-                      }),
+                      // Group transactions by multisig for preview
+                      groupTransactionsByMultisig(transactions).map(group => ({
+                        multisig: group.multisig,
+                        transactions: group.transactions.map((tx) => {
+                          const formatted = ABIParser.formatTransaction(tx);
+                          try {
+                            return JSON.parse(formatted);
+                          } catch {
+                            return formatted;
+                          }
+                        }),
+                      })),
                       null,
                       2
                     )}
