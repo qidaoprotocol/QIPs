@@ -636,25 +636,44 @@ ${qciData.content}`;
     if (qciData.transactions && qciData.transactions.length > 0) {
       formatted += '\n\n## Transactions\n\n';
       formatted += '```json\n';
-      
-      // Convert all transactions to proper JSON format
-      const jsonTransactions = qciData.transactions.map(tx => {
-        if (typeof tx === 'string') {
-          // Try to parse if it's already JSON
-          try {
-            return JSON.parse(tx);
-          } catch {
-            // Legacy format or plain string, skip for now
-            return null;
+
+      // Check if transactions[0] is already a stringified array of transaction groups
+      if (qciData.transactions.length === 1 && typeof qciData.transactions[0] === 'string') {
+        try {
+          const parsed = JSON.parse(qciData.transactions[0]);
+          // If it's already an array of transaction groups, use it directly
+          if (Array.isArray(parsed)) {
+            formatted += JSON.stringify(parsed, null, 2);
+          } else {
+            // Single transaction object, wrap in array
+            formatted += JSON.stringify([parsed], null, 2);
           }
-        } else if (typeof tx === 'object') {
-          return tx;
+        } catch (error) {
+          console.error('[ipfsService] Failed to parse transaction string:', error);
+          // Fall back to empty array
+          formatted += '[]';
         }
-        return null;
-      }).filter(tx => tx !== null);
-      
-      // Format as JSON array
-      formatted += JSON.stringify(jsonTransactions, null, 2);
+      } else {
+        // Convert all transactions to proper JSON format (legacy/fallback path)
+        const jsonTransactions = qciData.transactions.map(tx => {
+          if (typeof tx === 'string') {
+            // Try to parse if it's already JSON
+            try {
+              return JSON.parse(tx);
+            } catch {
+              // Legacy format or plain string, skip for now
+              return null;
+            }
+          } else if (typeof tx === 'object') {
+            return tx;
+          }
+          return null;
+        }).filter(tx => tx !== null);
+
+        // Format as JSON array
+        formatted += JSON.stringify(jsonTransactions, null, 2);
+      }
+
       formatted += '\n```\n';
     }
 
