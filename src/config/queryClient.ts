@@ -13,8 +13,10 @@ export const CACHE_TIMES = {
     QCI_NUMBERS: 2 * 60 * 1000,     // 2 minutes - QCI numbers (for pagination)
     IPFS_CONTENT: 60 * 60 * 1000,   // 1 hour - IPFS content is immutable
     STATUS_FILTER: 5 * 60 * 1000,   // 5 minutes - Status filtered lists
+    CONTRACT_ABI: 24 * 60 * 60 * 1000, // 24 hours - Contract ABIs are immutable
+    CONTRACT_HISTORY: Infinity,     // Never expire - user's local data
   },
-  
+
   // How long to keep data in cache (even if stale)
   GC_TIME: {
     QCI_LIST: 30 * 60 * 1000,       // 30 minutes
@@ -22,6 +24,8 @@ export const CACHE_TIMES = {
     QCI_NUMBERS: 10 * 60 * 1000,    // 10 minutes
     IPFS_CONTENT: 24 * 60 * 60 * 1000, // 24 hours - IPFS is immutable
     STATUS_FILTER: 30 * 60 * 1000,  // 30 minutes
+    CONTRACT_ABI: 7 * 24 * 60 * 60 * 1000, // 7 days - Contract ABIs don't change
+    CONTRACT_HISTORY: Infinity,     // Never garbage collect - user's local data
   }
 };
 
@@ -103,6 +107,16 @@ export function setupPersistentCache(queryClient: QueryClient) {
 
           // ALWAYS persist IPFS content (it's immutable)
           if (Array.isArray(queryKey) && queryKey[0] === 'ipfs') {
+            return true;
+          }
+
+          // ALWAYS persist contract ABIs (they're immutable)
+          if (Array.isArray(queryKey) && queryKey[0] === 'contract-abi') {
+            return true;
+          }
+
+          // ALWAYS persist contract history (user's local data)
+          if (Array.isArray(queryKey) && queryKey[0] === 'contract-history') {
             return true;
           }
 

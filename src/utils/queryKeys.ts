@@ -69,6 +69,14 @@ export const queryKeys = {
   // Status queries
   allStatuses: (registryAddress: string | undefined) =>
     ['statuses', registryAddress] as const,
+
+  // Contract ABI queries
+  contractABI: (chain: string, address: string) =>
+    ['contract-abi', chain, address] as const,
+
+  // Contract history queries
+  contractHistory: () =>
+    ['contract-history'] as const,
 } as const;
 
 /**
@@ -91,4 +99,10 @@ export const queryKeyPatterns = {
   
   // Invalidate all pages
   allPages: ['qcis-page'] as const,
+
+  // Invalidate all contract ABIs
+  allContractABIs: ['contract-abi'] as const,
+
+  // Invalidate contract history
+  contractHistory: ['contract-history'] as const,
 } as const;
