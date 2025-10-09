@@ -122,13 +122,10 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
 
         if (transactionsMatch) {
           let transactionsJson = JSON.parse(transactionsMatch[1]);
-          console.log('[TX_DEBUG] ProposalEditor: Initial parse - is array?', Array.isArray(transactionsJson), 'length:', transactionsJson?.length);
 
           // Handle double-nested array bug from older versions
           if (Array.isArray(transactionsJson) && transactionsJson.length === 1 && Array.isArray(transactionsJson[0])) {
-            console.log('[TX_DEBUG] ProposalEditor: Detected double-nested array, unwrapping...');
             transactionsJson = transactionsJson[0];
-            console.log('[TX_DEBUG] ProposalEditor: After unwrap - length:', transactionsJson.length);
           }
 
           if (Array.isArray(transactionsJson)) {
@@ -136,14 +133,11 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
             const isNewFormat = transactionsJson.length > 0 &&
                               'multisig' in transactionsJson[0] &&
                               'transactions' in transactionsJson[0];
-            console.log('[TX_DEBUG] ProposalEditor: Format detected:', isNewFormat ? 'NEW (multisig-grouped)' : 'LEGACY (flat)');
 
             if (isNewFormat) {
               // New format: flatten all transactions from all groups
-              console.log('[TX_DEBUG] ProposalEditor: Processing new format, groups:', transactionsJson.length);
               const allTransactions: TransactionData[] = [];
-              transactionsJson.forEach((group: any, groupIdx: number) => {
-                console.log(`[TX_DEBUG] ProposalEditor: Group ${groupIdx} - multisig:`, group.multisig, 'transactions:', group.transactions?.length);
+              transactionsJson.forEach((group: any) => {
                 group.transactions.forEach((tx: any) => {
                   const parsed = ABIParser.parseTransaction(JSON.stringify(tx));
                   // Preserve the multisig from the group
@@ -151,16 +145,13 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
                   allTransactions.push(parsed);
                 });
               });
-              console.log('[TX_DEBUG] ProposalEditor: Successfully parsed', allTransactions.length, 'transactions');
               setTransactions(allTransactions);
             } else {
               // Legacy format: array of transactions
-              console.log('[TX_DEBUG] ProposalEditor: Processing legacy format, transactions:', transactionsJson.length);
               const parsedTransactions = transactionsJson.map((tx) => {
                 const txString = JSON.stringify(tx);
                 return ABIParser.parseTransaction(txString);
               });
-              console.log('[TX_DEBUG] ProposalEditor: Successfully parsed', parsedTransactions.length, 'transactions');
               setTransactions(parsedTransactions);
             }
           }
@@ -204,9 +195,6 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
       setSaving(true);
 
       try {
-        console.log('[TX_DEBUG] ProposalEditor: Starting transaction serialization');
-        console.log('[TX_DEBUG] ProposalEditor: Raw transactions array:', transactions);
-
         // Group transactions by multisig address
         const transactionGroups = groupTransactionsByMultisig(transactions).map(group => ({
           multisig: group.multisig,
@@ -217,17 +205,10 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
           }),
         }));
 
-        console.log('[TX_DEBUG] ProposalEditor: Grouped transactions:', transactionGroups);
-
         // Serialize transaction groups as string for QCIContent
         const serializedTransactions = transactions.length > 0
           ? JSON.stringify(transactionGroups, null, 2)
           : undefined;
-
-        console.log('[TX_DEBUG] ProposalEditor: Serialized transactions:', serializedTransactions);
-        if (serializedTransactions) {
-          console.log('[TX_DEBUG] ProposalEditor: Serialized transactions length:', serializedTransactions.length);
-        }
 
         // Create QCI content object
         const qciContent: QCIContent = {

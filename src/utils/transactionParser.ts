@@ -43,15 +43,10 @@ export function extractTransactionsFromMarkdown(content: string): {
       };
     }
 
-    console.log('[TX_DEBUG] transactionParser: Parsed JSON from markdown, length:', transactionsJson.length);
-    console.log('[TX_DEBUG] transactionParser: First element type:', typeof transactionsJson[0]);
-
     // Handle double-nested array bug from older versions
     // If the first element is itself an array, unwrap it
     if (transactionsJson.length === 1 && Array.isArray(transactionsJson[0])) {
-      console.log('[TX_DEBUG] transactionParser: Detected double-nested array, unwrapping...');
       transactionsJson = transactionsJson[0];
-      console.log('[TX_DEBUG] transactionParser: After unwrap, length:', transactionsJson.length);
     }
 
     // Detect format: check if first element has 'multisig' and 'transactions' fields
@@ -59,15 +54,11 @@ export function extractTransactionsFromMarkdown(content: string): {
                         'multisig' in transactionsJson[0] &&
                         'transactions' in transactionsJson[0];
 
-    console.log('[TX_DEBUG] transactionParser: Format detected:', isNewFormat ? 'NEW (multisig-grouped)' : 'LEGACY (flat)');
-
     let transactionGroups: MultisigTransactionGroup[];
 
     if (isNewFormat) {
       // New format: array of { multisig, transactions } objects
-      console.log('[TX_DEBUG] transactionParser: Processing new format, groups:', transactionsJson.length);
-      transactionGroups = transactionsJson.map((group: any, groupIdx: number) => {
-        console.log(`[TX_DEBUG] transactionParser: Group ${groupIdx} - multisig:`, group.multisig, 'transactions:', group.transactions?.length);
+      transactionGroups = transactionsJson.map((group: any) => {
         return {
           multisig: group.multisig,
           transactions: group.transactions.map((tx: any) =>
@@ -77,7 +68,6 @@ export function extractTransactionsFromMarkdown(content: string): {
       });
     } else {
       // Legacy format: array of transactions (no multisig grouping)
-      console.log('[TX_DEBUG] transactionParser: Processing legacy format, transactions:', transactionsJson.length);
       const transactions = transactionsJson.map((tx: any) =>
         ABIParser.parseTransaction(JSON.stringify(tx))
       );
@@ -91,9 +81,6 @@ export function extractTransactionsFromMarkdown(content: string): {
 
     // Flatten all transactions for backward compatibility
     const allTransactions = transactionGroups.flatMap(group => group.transactions);
-
-    console.log('[TX_DEBUG] transactionParser: Successfully parsed transactions');
-    console.log('[TX_DEBUG] transactionParser: Groups:', transactionGroups.length, 'Total transactions:', allTransactions.length);
 
     // Remove the transactions section from content for rendering
     const contentWithoutTransactions = content

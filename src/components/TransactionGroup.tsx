@@ -39,27 +39,21 @@ export const TransactionGroup: React.FC<TransactionGroupProps> = ({
   const transactionGroups = React.useMemo(() => {
     // If transactions is a string array, parse it first
     if (transactions.length > 0 && typeof transactions[0] === 'string') {
-      console.log('[TX_DEBUG] TransactionGroup: Parsing string transactions');
       try {
         let parsed = JSON.parse(transactions[0] as string);
-        console.log('[TX_DEBUG] TransactionGroup: Initial parse - is array?', Array.isArray(parsed), 'length:', parsed?.length);
 
         // Handle double-nested array bug from older versions
         if (Array.isArray(parsed) && parsed.length === 1 && Array.isArray(parsed[0])) {
-          console.log('[TX_DEBUG] TransactionGroup: Detected double-nested array, unwrapping...');
           parsed = parsed[0];
-          console.log('[TX_DEBUG] TransactionGroup: After unwrap - length:', parsed.length);
         }
 
         // Check if it's the new format (array of multisig groups)
         if (Array.isArray(parsed) && parsed.length > 0 && 'multisig' in parsed[0] && 'transactions' in parsed[0]) {
-          console.log('[TX_DEBUG] TransactionGroup: Parsing new format (multisig-grouped) transactions');
           return parsed.map((group: any) => ({
             multisig: group.multisig,
             transactions: group.transactions.map((tx: any) => ABIParser.parseTransaction(JSON.stringify(tx))),
           }));
         } else if (Array.isArray(parsed)) {
-          console.log('[TX_DEBUG] TransactionGroup: Parsing legacy format (flat array) transactions');
           const txs = parsed.map((tx: any) => ABIParser.parseTransaction(JSON.stringify(tx)));
           return groupTransactionsByMultisig(txs);
         }
@@ -69,7 +63,6 @@ export const TransactionGroup: React.FC<TransactionGroupProps> = ({
       return [];
     } else {
       // Already parsed TransactionData[]
-      console.log('[TX_DEBUG] TransactionGroup: Grouping parsed transactions');
       return groupTransactionsByMultisig(transactions as TransactionData[]);
     }
   }, [transactions]);
