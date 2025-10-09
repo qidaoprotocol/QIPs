@@ -79,7 +79,7 @@ export function useQCI({
         const cachedIPFS = queryClient.getQueryData<any>(ipfsCacheKey);
         
         let ipfsContent, frontmatter, content;
-        
+
         if (cachedIPFS) {
           console.log(`[useQCI] ✓ Using cached IPFS content for QCI-${qciNumber}`, {
             cacheKeys: Object.keys(cachedIPFS),
@@ -89,7 +89,7 @@ export function useQCI({
             rawLength: cachedIPFS.raw?.length,
             bodyLength: cachedIPFS.body?.length
           });
-          
+
           // If we have already parsed content (from prefetch), use it directly
           // Check if this is a structured cache entry (has 'raw' field) with parsed data
           // Note: useQCIDataPaginated uses 'content' field, ProposalListItem uses 'body' field
@@ -103,19 +103,19 @@ export function useQCI({
             // If cachedIPFS.raw exists, use it; otherwise cachedIPFS itself is the raw content
             ipfsContent = cachedIPFS.raw || cachedIPFS;
             const parsed = ipfsService.parseQCIMarkdown(ipfsContent);
-            
+
             frontmatter = parsed.frontmatter;
             content = parsed.content;
           }
-          
+
         } else {
           console.log(`[useQCI] 🌐 Fetching IPFS content for QCI-${qciNumber} from ${qci.ipfsUrl}`);
           ipfsContent = await ipfsService.fetchQCI(qci.ipfsUrl);
           const parsed = ipfsService.parseQCIMarkdown(ipfsContent);
-          
+
           frontmatter = parsed.frontmatter;
           content = parsed.content;
-          
+
           // Cache IPFS content
           queryClient.setQueryData(ipfsCacheKey, {
             raw: ipfsContent,
@@ -143,11 +143,11 @@ export function useQCI({
           implementor: qci.implementor,
           implementationDate: implDate,
           // Filter out TBU and other placeholders
-          proposal: (qci.snapshotProposalId && 
-                    qci.snapshotProposalId !== 'TBU' && 
+          proposal: (qci.snapshotProposalId &&
+                    qci.snapshotProposalId !== 'TBU' &&
                     qci.snapshotProposalId !== 'tbu' &&
-                    qci.snapshotProposalId !== 'None') 
-                    ? qci.snapshotProposalId 
+                    qci.snapshotProposalId !== 'None')
+                    ? qci.snapshotProposalId
                     : 'None',
           created: frontmatter.created || new Date(Number(qci.createdAt) * 1000).toISOString().split('T')[0],
           // Ensure content is never undefined - use empty string as fallback

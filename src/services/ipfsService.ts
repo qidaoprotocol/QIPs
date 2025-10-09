@@ -846,7 +846,7 @@ ${qciData.content}`;
     frontmatter: Record<string, any>;
     content: string;
   } {
-    
+
     // Ensure we have a string to work with
     if (typeof markdown !== "string") {
       console.error("parseQCIMarkdown received non-string:", typeof markdown, markdown);
@@ -866,7 +866,7 @@ ${qciData.content}`;
             `proposal: ${obj.proposal || "None"}`,
             `created: ${obj.created || new Date().toISOString().split("T")[0]}`,
           ].join("\n");
-          
+
           const content = obj.content || "";
           markdown = `---\n${frontmatter}\n---\n\n${content}`;
         } else {
@@ -895,7 +895,7 @@ ${qciData.content}`;
 
     const yamlContent = match[1];
     const content = match[2].trim();
-    
+
 
     // Simple YAML parsing
     const frontmatter: Record<string, any> = {};

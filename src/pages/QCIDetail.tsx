@@ -22,6 +22,10 @@ import SnapshotModerator from "../components/SnapshotModerator";
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { config } from '../config/env'
+import { extractTransactionsFromMarkdown } from '../utils/transactionParser'
+import { ABIParser } from '../utils/abiParser'
+import { getAddressExplorerUrl } from '../config/blockExplorers'
+import { ExternalLink } from 'lucide-react'
 
 const QCIDetail: React.FC = () => {
   const { qciNumber } = useParams<{ qciNumber: string }>()
@@ -261,6 +265,9 @@ const QCIDetail: React.FC = () => {
     version: qciData.version
   }
 
+  // Extract transactions from content for separate display
+  const { contentWithoutTransactions, transactions } = extractTransactionsFromMarkdown(qciData.content)
+
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="max-w-4xl mx-auto">
@@ -400,9 +407,80 @@ const QCIDetail: React.FC = () => {
         <div className="prose prose-lg dark:prose-invert max-w-none">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>
             {/* Fix reversed markdown link syntax (text)[url] -> [text](url) */}
-            {qciData.content?.replace(/\(([^)]+)\)\[([^\]]+)\]/g, "[$1]($2)")}
+            {contentWithoutTransactions?.replace(/\(([^)]+)\)\[([^\]]+)\]/g, "[$1]($2)")}
           </ReactMarkdown>
         </div>
+
+        {/* Display transactions if present */}
+        {transactions.length > 0 && (
+          <div className="mt-8 border-t pt-8">
+            <h2 className="text-2xl font-bold mb-4">Transactions</h2>
+            <div className="space-y-4">
+              {transactions.map((tx, index) => (
+                <div key={index} className="border rounded-lg p-4 bg-muted/30">
+                  <div className="space-y-2">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <p className="font-semibold text-lg">{tx.functionName}()</p>
+                        <p className="text-sm text-muted-foreground">on {tx.chain}</p>
+                      </div>
+                      <div className="text-xs font-mono text-muted-foreground">
+                        #{index + 1}
+                      </div>
+                    </div>
+
+                    <div className="text-sm">
+                      <span className="font-medium">Contract:</span>{' '}
+                      {(() => {
+                        const explorerUrl = getAddressExplorerUrl(tx.chain, tx.contractAddress);
+
+                        if (explorerUrl) {
+                          return (
+                            <a
+                              href={explorerUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted text-xs font-mono hover:bg-muted/80 transition-colors underline decoration-dotted underline-offset-2"
+                            >
+                              {tx.contractAddress}
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          );
+                        }
+
+                        return (
+                          <code className="px-1.5 py-0.5 rounded bg-muted text-xs">
+                            {tx.contractAddress}
+                          </code>
+                        );
+                      })()}
+                    </div>
+
+                    {tx.args.length > 0 && (
+                      <div className="text-sm">
+                        <span className="font-medium">Arguments:</span>
+                        <pre className="mt-1 p-2 bg-muted rounded text-xs overflow-x-auto">
+                          {JSON.stringify(tx.args, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+
+                    <div className="pt-2 border-t">
+                      <details className="text-xs">
+                        <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                          View formatted transaction
+                        </summary>
+                        <pre className="mt-2 p-2 bg-muted rounded overflow-x-auto">
+                          {ABIParser.formatTransaction(tx)}
+                        </pre>
+                      </details>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Version info */}
         <div className="mt-8 p-4 bg-muted rounded">
