@@ -34,6 +34,7 @@ export const TransactionGroup: React.FC<TransactionGroupProps> = ({
   const [openTxStrings, setOpenTxStrings] = React.useState<Record<string, boolean>>({});
   const [copiedIndex, setCopiedIndex] = React.useState<string | null>(null);
   const [copiedMultisig, setCopiedMultisig] = React.useState<string | null>(null);
+  const [copiedContractAddress, setCopiedContractAddress] = React.useState<string | null>(null);
 
   // Parse and group transactions
   const transactionGroups = React.useMemo(() => {
@@ -95,6 +96,12 @@ export const TransactionGroup: React.FC<TransactionGroupProps> = ({
     setTimeout(() => setCopiedMultisig(null), 2000);
   };
 
+  const handleCopyContractAddress = (address: string) => {
+    navigator.clipboard.writeText(address);
+    setCopiedContractAddress(address);
+    setTimeout(() => setCopiedContractAddress(null), 2000);
+  };
+
   const toggleTxString = (txId: string) => {
     setOpenTxStrings(prev => ({
       ...prev,
@@ -143,22 +150,16 @@ export const TransactionGroup: React.FC<TransactionGroupProps> = ({
                     {(() => {
                       const multisigExplorerUrl = getChainExplorerUrl(getGroupChain(group), group.multisig);
                       return multisigExplorerUrl ? (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6"
-                          asChild
+                        <a
+                          href={multisigExplorerUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="View multisig on block explorer"
                           onClick={(e) => e.stopPropagation()}
+                          className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
                         >
-                          <a
-                            href={multisigExplorerUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title="View on block explorer"
-                          >
-                            <ExternalLink size={14} />
-                          </a>
-                        </Button>
+                          <ExternalLink size={14} />
+                        </a>
                       ) : null;
                     })()}
                   </div>
@@ -174,17 +175,18 @@ export const TransactionGroup: React.FC<TransactionGroupProps> = ({
                         }}
                         variant="ghost"
                         size="sm"
-                        className="h-7"
+                        className="h-7 text-xs"
+                        title="Copy multisig address"
                       >
                         {copiedMultisig === group.multisig ? (
                           <>
                             <CheckCircle size={12} className="mr-1 text-green-500" />
-                            Copied
+                            <span className="text-green-500">Copied!</span>
                           </>
                         ) : (
                           <>
                             <Copy size={12} className="mr-1" />
-                            Copy
+                            <span>Copy Address</span>
                           </>
                         )}
                       </Button>
@@ -229,26 +231,35 @@ export const TransactionGroup: React.FC<TransactionGroupProps> = ({
                           <Badge variant="secondary" className="text-xs">
                             {tx.chain}
                           </Badge>
-                          <code className="text-xs font-mono text-muted-foreground">
-                            {tx.contractAddress}
-                          </code>
-                          {explorerUrl && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-5 w-5"
-                              asChild
+                          {explorerUrl ? (
+                            <a
+                              href={explorerUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="View contract on block explorer"
+                              className="inline-flex items-center gap-1 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors"
                             >
-                              <a
-                                href={explorerUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title="View contract on block explorer"
-                              >
-                                <ExternalLink size={12} />
-                              </a>
-                            </Button>
+                              <span>{tx.contractAddress}</span>
+                              <ExternalLink size={12} />
+                            </a>
+                          ) : (
+                            <code className="text-xs font-mono text-muted-foreground">
+                              {tx.contractAddress}
+                            </code>
                           )}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-5 w-5"
+                            onClick={() => handleCopyContractAddress(tx.contractAddress)}
+                            title="Copy contract address"
+                          >
+                            {copiedContractAddress === tx.contractAddress ? (
+                              <CheckCircle size={12} className="text-green-500" />
+                            ) : (
+                              <Copy size={12} className="text-muted-foreground hover:text-foreground" />
+                            )}
+                          </Button>
                         </div>
 
                         {/* Function call */}
@@ -275,41 +286,39 @@ export const TransactionGroup: React.FC<TransactionGroupProps> = ({
                           >
                             <div className="mt-2 pt-2 border-t border-border/30">
                               <CollapsibleTrigger asChild>
-                                <div className="flex items-center justify-between mb-1 cursor-pointer hover:bg-muted/30 rounded p-1 -ml-1">
-                                  <div className="flex items-center gap-1">
-                                    {openTxStrings[txId] ? (
-                                      <ChevronDown size={12} className="text-muted-foreground" />
-                                    ) : (
-                                      <ChevronRight size={12} className="text-muted-foreground" />
-                                    )}
-                                    <span className="text-xs text-muted-foreground">Transaction String</span>
-                                  </div>
+                                <div className="flex items-center gap-1 mb-1 cursor-pointer hover:bg-muted/30 rounded p-1 -ml-1">
+                                  {openTxStrings[txId] ? (
+                                    <ChevronDown size={12} className="text-muted-foreground" />
+                                  ) : (
+                                    <ChevronRight size={12} className="text-muted-foreground" />
+                                  )}
+                                  <span className="text-xs text-muted-foreground">Technical Details</span>
+                                </div>
+                              </CollapsibleTrigger>
+                              <CollapsibleContent>
+                                <div className="rounded bg-muted/40 p-3 mt-1">
+                                  <pre className="text-xs font-mono overflow-x-auto mb-2">
+                                    <code>{JSON.stringify(JSON.parse(txString), null, 2)}</code>
+                                  </pre>
                                   <Button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleCopy(txString, txId);
-                                    }}
+                                    onClick={() => handleCopy(txString, txId)}
                                     variant="ghost"
                                     size="sm"
-                                    className="h-6"
+                                    className="h-6 text-xs px-2 text-muted-foreground hover:text-foreground"
+                                    title="Copy raw transaction JSON"
                                   >
                                     {copiedIndex === txId ? (
                                       <>
                                         <CheckCircle size={12} className="mr-1 text-green-500" />
-                                        <span className="text-xs">Copied</span>
+                                        <span className="text-green-500">Copied</span>
                                       </>
                                     ) : (
                                       <>
                                         <Copy size={12} className="mr-1" />
-                                        <span className="text-xs">Copy</span>
+                                        <span>Copy JSON</span>
                                       </>
                                     )}
                                   </Button>
-                                </div>
-                              </CollapsibleTrigger>
-                              <CollapsibleContent>
-                                <div className="rounded bg-muted/40 p-2 mt-1">
-                                  <code className="text-xs font-mono break-all">{txString}</code>
                                 </div>
                               </CollapsibleContent>
                             </div>
