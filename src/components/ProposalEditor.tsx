@@ -79,11 +79,20 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
 
   const importedData = (location.state as any)?.importedData;
 
+  // Strip transactions from content for textarea display
+  const getContentWithoutTransactions = (fullContent: string) => {
+    return fullContent.replace(/##\s*Transactions\s*\n+```json\s*\n[\s\S]+?\n```\s*/, '').trim();
+  };
+
   const [title, setTitle] = useState(existingQCI?.content.title || importedData?.title || initialTitle || "");
   const [combooxSelectedChain, setComboboxSelectedChain] = useState(
     existingQCI?.content.chain || importedData?.chain || initialChain || "Polygon"
   );
-  const [content, setContent] = useState(existingQCI?.content.content || importedData?.content || initialContent || "");
+  const [content, setContent] = useState(
+    existingQCI?.content.content
+      ? getContentWithoutTransactions(existingQCI.content.content)
+      : importedData?.content || initialContent || ""
+  );
   const [implementor, setImplementor] = useState(
     existingQCI?.content.implementor || importedData?.implementor || initialImplementor || "None"
   );
@@ -101,6 +110,30 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
   // Initialize mutation hooks
   const createQCIMutation = useCreateQCI({ registryAddress });
   const updateQCIMutation = useUpdateQCI({ registryAddress });
+
+  // Initialize transactions from existing QCI content
+  useEffect(() => {
+    if (existingQCI?.content.content) {
+      try {
+        // Extract transactions from the markdown content
+        const transactionsMatch = existingQCI.content.content.match(/##\s*Transactions\s*\n+```json\s*\n([\s\S]+?)\n```/);
+
+        if (transactionsMatch) {
+          const transactionsJson = JSON.parse(transactionsMatch[1]);
+          if (Array.isArray(transactionsJson)) {
+            const parsedTransactions = transactionsJson.map((tx) => {
+              const txString = JSON.stringify(tx);
+              return ABIParser.parseTransaction(txString);
+            });
+            setTransactions(parsedTransactions);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to parse existing transactions:', error);
+        // Don't block the editor if transaction parsing fails
+      }
+    }
+  }, [existingQCI]);
 
   // Add a safety timeout to clear saving state if it gets stuck
   useEffect(() => {

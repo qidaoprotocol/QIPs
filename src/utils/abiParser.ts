@@ -197,11 +197,11 @@ export class ABIParser {
       'Metis': 1088,
       // Add more as needed
     };
-    
+
     // Get chain ID, fallback to chain name if not found
     const chainId = chainIdMap[data.chain] || data.chain;
-    
-    // Create a structured transaction object
+
+    // Create a structured transaction object (ABI is NOT stored to keep size small)
     const transaction = {
       chainId: chainId,
       to: data.contractAddress,
@@ -212,7 +212,7 @@ export class ABIParser {
       // gasLimit: 100000,
       // description: "Transaction description"
     };
-    
+
     return JSON.stringify(transaction, null, 2);
   }
 
@@ -234,7 +234,7 @@ export class ABIParser {
    * Parse a formatted transaction string back to TransactionData
    * Supports both new JSON format and legacy colon-separated format
    */
-  static parseTransaction(transactionString: string): Omit<TransactionData, 'abi'> {
+  static parseTransaction(transactionString: string): TransactionData {
     // Map chain IDs back to chain names
     const chainNameMap: Record<number, string> = {
       1: 'Ethereum',
@@ -246,22 +246,29 @@ export class ABIParser {
       43114: 'Avalanche',
       1088: 'Metis',
     };
-    
+
     // First, try to parse as JSON (new format)
     try {
       const parsed = JSON.parse(transactionString);
       if ((parsed.chainId || parsed.chain) && (parsed.to || parsed.address || parsed.contractAddress) && parsed.function) {
         // Convert chainId to chain name if needed
         let chain = parsed.chain;
-        if (parsed.chainId && typeof parsed.chainId === 'number') {
-          chain = chainNameMap[parsed.chainId] || `Chain ${parsed.chainId}`;
+        if (parsed.chainId) {
+          if (typeof parsed.chainId === 'number') {
+            // Numeric chainId - map to chain name
+            chain = chainNameMap[parsed.chainId] || `Chain ${parsed.chainId}`;
+          } else if (typeof parsed.chainId === 'string') {
+            // String chainId like "Polygon PoS" - use directly
+            chain = parsed.chainId;
+          }
         }
-        
+
         return {
           chain: chain,
           contractAddress: parsed.to || parsed.address || parsed.contractAddress,
           functionName: parsed.function || parsed.functionName,
-          args: parsed.args || []
+          args: parsed.args || [],
+          abi: [] // ABI is not stored, will be fetched on edit
         };
       }
     } catch {
@@ -317,7 +324,8 @@ export class ABIParser {
       chain,
       contractAddress,
       functionName,
-      args
+      args,
+      abi: [] // Legacy format doesn't store ABI
     };
   }
 

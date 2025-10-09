@@ -13,8 +13,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { AlertCircle, Check } from 'lucide-react';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
+import { AlertCircle, Check, Download, Loader2, Info, ChevronDown, ChevronRight } from 'lucide-react';
 import { FunctionSelector } from './FunctionSelector';
+import { ContractSelector } from './ContractSelector';
+import { useFetchContractABI, useContractABI } from '../hooks/useContractABI';
+import { useContractHistory } from '../hooks/useContractHistory';
+import type { CachedContract } from '../types/abi';
+import { hasApiKey } from '../utils/settings';
 
 interface TransactionFormatterProps {
   isOpen: boolean;
@@ -40,19 +50,62 @@ export const TransactionFormatter: React.FC<TransactionFormatterProps> = ({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [parseError, setParseError] = useState('');
   const [formattedTransaction, setFormattedTransaction] = useState('');
+  const [fetchABISuccess, setFetchABISuccess] = useState('');
+  const [fetchABIError, setFetchABIError] = useState('');
+  const [contractName, setContractName] = useState('');
+  const [isProxyContract, setIsProxyContract] = useState(false);
+  const [implementationAddress, setImplementationAddress] = useState('');
+
+  // Collapsible section states
+  const [contractSetupOpen, setContractSetupOpen] = useState(true);
+  const [abiInputOpen, setAbiInputOpen] = useState(true);
+  const [functionSelectionOpen, setFunctionSelectionOpen] = useState(true);
+
+  // Contract ABI fetching and history
+  const fetchABIMutation = useFetchContractABI();
+  const { addToHistory } = useContractHistory();
+
+  // Check if API key is available for ABI fetching features
+  const apiKeyAvailable = hasApiKey();
+
+  // Auto-fetch ABI when editing a transaction (only if no ABI and API key available)
+  const shouldAutoFetch = !!(
+    editingTransaction &&
+    editingTransaction.contractAddress &&
+    editingTransaction.chain &&
+    apiKeyAvailable &&
+    (!editingTransaction.abi || editingTransaction.abi.length === 0)
+  );
+
+  const autoFetchedABI = useContractABI(
+    editingTransaction?.contractAddress || '',
+    editingTransaction?.chain || '',
+    {
+      enabled: shouldAutoFetch,
+      onError: (error) => {
+        setFetchABIError(error);
+        setAbiInputOpen(true);
+      },
+    }
+  );
 
   // Initialize edit mode
   useEffect(() => {
     if (editingTransaction) {
       setChain(editingTransaction.chain);
       setContractAddress(editingTransaction.contractAddress);
-      
-      // Set ABI if available
-      if (editingTransaction.abi) {
-        setAbiInput(JSON.stringify(editingTransaction.abi, null, 2));
-        handleParseABI(JSON.stringify(editingTransaction.abi, null, 2));
+
+      // Set ABI if available in the transaction
+      if (editingTransaction.abi && editingTransaction.abi.length > 0) {
+        const abiString = JSON.stringify(editingTransaction.abi, null, 2);
+        setAbiInput(abiString);
+        handleParseABI(abiString);
+      } else if (!apiKeyAvailable) {
+        // Prompt user to paste ABI if no API key
+        setFetchABIError('Please paste the contract ABI below to edit this transaction, or configure an API key in Settings to auto-fetch it.');
+        setAbiInputOpen(true);
       }
-      
+
       // Pre-fill function and args
       if (editingTransaction.functionName && editingTransaction.args) {
         const args: Record<string, string> = {};
@@ -62,14 +115,72 @@ export const TransactionFormatter: React.FC<TransactionFormatterProps> = ({
         setFunctionArgs(args);
       }
     }
-  }, [editingTransaction]);
+  }, [editingTransaction, apiKeyAvailable]);
+
+  // Handle auto-fetched ABI data
+  useEffect(() => {
+    if (autoFetchedABI.data && shouldAutoFetch) {
+      const abiString = JSON.stringify(autoFetchedABI.data.abi, null, 2);
+      setAbiInput(abiString);
+      setContractName(autoFetchedABI.data.name);
+      handleParseABI(abiString);
+
+      // Check if this is a proxy contract
+      if (autoFetchedABI.data.isProxy && autoFetchedABI.data.implementation) {
+        setIsProxyContract(true);
+        setImplementationAddress(autoFetchedABI.data.implementation);
+        setFetchABISuccess(
+          `Proxy contract detected! Using implementation ABI from ${autoFetchedABI.data.name}`
+        );
+      } else {
+        setFetchABISuccess(`Loaded ABI for ${autoFetchedABI.data.name}`);
+      }
+    }
+  }, [autoFetchedABI.data, shouldAutoFetch]);
+
+  // Auto-select function when editing (after ABI is parsed)
+  useEffect(() => {
+    if (editingTransaction && editingTransaction.functionName && parsedFunctions.length > 0) {
+      // Find the function by name
+      const matchingFunction = parsedFunctions.find(
+        fn => fn.name === editingTransaction.functionName
+      );
+
+      if (matchingFunction) {
+        setSelectedFunction(matchingFunction);
+      } else {
+        // Function not found in ABI - keep function selection open
+        console.warn(
+          `[TransactionFormatter] Function "${editingTransaction.functionName}" not found in parsed ABI. ` +
+          `Available functions: ${parsedFunctions.map(f => f.name).join(', ')}`
+        );
+        setFunctionSelectionOpen(true);
+      }
+    }
+  }, [editingTransaction, parsedFunctions]);
+
+  // Auto-collapse sections when completed
+  useEffect(() => {
+    // Collapse contract setup and ABI input when ABI is parsed
+    if (parsedFunctions.length > 0) {
+      setContractSetupOpen(false);
+      setAbiInputOpen(false);
+    }
+  }, [parsedFunctions]);
+
+  useEffect(() => {
+    // Collapse function selection when function is selected
+    if (selectedFunction) {
+      setFunctionSelectionOpen(false);
+    }
+  }, [selectedFunction]);
 
   // Update formatted transaction preview
   useEffect(() => {
     if (chain && contractAddress && selectedFunction && Object.keys(functionArgs).length === selectedFunction.inputs.length) {
       const args = selectedFunction.inputs.map((_, index) => functionArgs[`arg_${index}`] || '');
       const hasAllArgs = args.every(arg => arg !== '');
-      
+
       if (hasAllArgs) {
         const transaction: TransactionData = {
           chain,
@@ -81,7 +192,7 @@ export const TransactionFormatter: React.FC<TransactionFormatterProps> = ({
           }),
           abi: [] // Will be set when adding
         };
-        
+
         setFormattedTransaction(ABIParser.formatTransaction(transaction));
       } else {
         setFormattedTransaction('');
@@ -111,6 +222,70 @@ export const TransactionFormatter: React.FC<TransactionFormatterProps> = ({
     }
   };
 
+  const handleFetchABI = async () => {
+    if (!contractAddress || !/^0x[a-fA-F0-9]{40}$/.test(contractAddress)) {
+      setFetchABIError('Please enter a valid contract address first');
+      return;
+    }
+
+    if (!chain) {
+      setFetchABIError('Please select a chain first');
+      return;
+    }
+
+    setFetchABISuccess('');
+    setFetchABIError('');
+    setIsProxyContract(false);
+    setImplementationAddress('');
+
+    try {
+      const result = await fetchABIMutation.mutateAsync({
+        address: contractAddress,
+        chain,
+      });
+
+      if (result.success && result.data) {
+        // Update ABI input and parse
+        const abiString = JSON.stringify(result.data.abi, null, 2);
+        setAbiInput(abiString);
+        setContractName(result.data.name);
+        handleParseABI(abiString);
+
+        // Check if this is a proxy contract
+        if (result.data.isProxy && result.data.implementation) {
+          setIsProxyContract(true);
+          setImplementationAddress(result.data.implementation);
+          setFetchABISuccess(
+            `Proxy contract detected! Using implementation ABI from ${result.data.name}`
+          );
+        } else {
+          setIsProxyContract(false);
+          setFetchABISuccess(`Successfully fetched ABI for ${result.data.name}`);
+        }
+      } else {
+        setFetchABIError(result.error || 'Failed to fetch ABI');
+      }
+    } catch (error) {
+      setFetchABIError(error instanceof Error ? error.message : 'Failed to fetch ABI');
+    }
+  };
+
+  const handleContractSelect = (contract: CachedContract) => {
+    // Auto-populate form with contract data
+    setContractAddress(contract.address);
+    setChain(contract.chain);
+    setContractName(contract.name);
+
+    // Set and parse ABI
+    const abiString = JSON.stringify(contract.abi, null, 2);
+    setAbiInput(abiString);
+    handleParseABI(abiString);
+
+    // Show success message
+    setFetchABISuccess(`Loaded ${contract.name} from history`);
+    setFetchABIError('');
+  };
+
   const handleFunctionSelect = (func: ParsedFunction) => {
     setSelectedFunction(func);
     setFunctionArgs({});
@@ -138,7 +313,7 @@ export const TransactionFormatter: React.FC<TransactionFormatterProps> = ({
     }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!chain || !contractAddress || !selectedFunction) {
       return;
     }
@@ -149,7 +324,7 @@ export const TransactionFormatter: React.FC<TransactionFormatterProps> = ({
 
     selectedFunction.inputs.forEach((input, index) => {
       const value = functionArgs[`arg_${index}`] || '';
-      
+
       if (!value) {
         setErrors(prev => ({ ...prev, [`arg_${index}`]: 'This field is required' }));
         hasErrors = true;
@@ -180,6 +355,21 @@ export const TransactionFormatter: React.FC<TransactionFormatterProps> = ({
       abi
     };
 
+    // Save to contract history
+    try {
+      await addToHistory({
+        address: contractAddress,
+        chain,
+        name: contractName || 'Unknown Contract',
+        abi,
+        lastUsed: Date.now(),
+        verified: true,
+      });
+    } catch (error) {
+      console.warn('Failed to add contract to history:', error);
+      // Don't block transaction submission if history save fails
+    }
+
     onAdd(transaction);
     handleClose();
   };
@@ -194,6 +384,14 @@ export const TransactionFormatter: React.FC<TransactionFormatterProps> = ({
     setErrors({});
     setParseError('');
     setFormattedTransaction('');
+    setFetchABISuccess('');
+    setFetchABIError('');
+    setContractName('');
+    setIsProxyContract(false);
+    setImplementationAddress('');
+    setContractSetupOpen(true);
+    setAbiInputOpen(true);
+    setFunctionSelectionOpen(true);
     onClose();
   };
 
@@ -210,107 +408,238 @@ export const TransactionFormatter: React.FC<TransactionFormatterProps> = ({
         </DialogHeader>
 
         <div className="space-y-6 mt-4">
-          {/* Chain Selection */}
-          <div className="space-y-2">
-            <Label htmlFor="chain">Chain</Label>
-            <ChainCombobox
-              value={chain}
-              onChange={setChain}
-              placeholder="Select or type a chain..."
-              networks={networks}
-            />
-          </div>
-
-          {/* Contract Address */}
-          <div className="space-y-2">
-            <Label htmlFor="contractAddress">Contract Address</Label>
-            <Input
-              id="contractAddress"
-              type="text"
-              value={contractAddress}
-              onChange={(e) => setContractAddress(e.target.value)}
-              placeholder="0x..."
-            />
-            {contractAddress && !/^0x[a-fA-F0-9]{40}$/.test(contractAddress) && (
-              <p className="text-sm text-destructive">Invalid address format</p>
-            )}
-          </div>
-
-          {/* ABI Input */}
-          <div className="space-y-2">
-            <Label htmlFor="abi">Contract ABI</Label>
-            <Textarea
-              id="abi"
-              value={abiInput}
-              onChange={(e) => setAbiInput(e.target.value)}
-              placeholder='Paste contract ABI JSON here, e.g., [{"type":"function","name":"transfer","inputs":[...],"outputs":[...]}]'
-              rows={6}
-              className="font-mono text-sm"
-            />
-            {parseError && (
-              <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{parseError}</AlertDescription>
-              </Alert>
-            )}
-            <Button
-              onClick={() => handleParseABI()}
-              variant="secondary"
-            >
-              Parse ABI
-            </Button>
-          </div>
-
-          {/* Function Selection */}
-          {parsedFunctions.length > 0 && (
-            <FunctionSelector
-              functions={parsedFunctions}
-              selectedFunction={selectedFunction}
-              onSelect={handleFunctionSelect}
-            />
-          )}
-
-          {/* Function Arguments */}
-          {selectedFunction && selectedFunction.inputs.length > 0 && (
-            <div className="space-y-2">
-              <Label>Function Arguments</Label>
-              <div className="space-y-3">
-                {selectedFunction.inputs.map((input, index) => (
-                  <div key={index} className="space-y-2">
-                    <Label htmlFor={`arg_${index}`}>
-                      {input.name || `Parameter ${index + 1}`} ({input.type})
-                    </Label>
-                    <Input
-                      id={`arg_${index}`}
-                      type="text"
-                      value={functionArgs[`arg_${index}`] || ''}
-                      onChange={(e) => handleArgChange(index, e.target.value, input.type)}
-                      placeholder={ABIParser.getTypeDescription(input.type)}
-                      className={errors[`arg_${index}`] ? 'border-destructive' : ''}
-                    />
-                    {errors[`arg_${index}`] && (
-                      <p className="text-sm text-destructive flex items-center gap-1">
-                        <AlertCircle size={14} />
-                        {errors[`arg_${index}`]}
-                      </p>
-                    )}
+          {/* Contract Setup Section */}
+          <Collapsible open={contractSetupOpen} onOpenChange={setContractSetupOpen}>
+            <div className="flex items-center justify-between">
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" className="w-full justify-between p-2 h-auto">
+                  <div className="flex items-center gap-2">
+                    {contractSetupOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                    <span className="font-semibold">1. Contract Setup</span>
                   </div>
-                ))}
-              </div>
+                  {!contractSetupOpen && chain && contractAddress && (
+                    <span className="text-sm text-muted-foreground font-mono">
+                      {contractName || 'Contract'} on {chain}
+                    </span>
+                  )}
+                </Button>
+              </CollapsibleTrigger>
             </div>
+            <CollapsibleContent className="space-y-4 mt-4">
+              {/* Chain Selection */}
+              <div className="space-y-2">
+                <Label htmlFor="chain">Chain</Label>
+                <ChainCombobox
+                  value={chain}
+                  onChange={setChain}
+                  placeholder="Select or type a chain..."
+                  networks={networks}
+                />
+              </div>
+
+              {/* Contract History Selector - Only show if API key available */}
+              {apiKeyAvailable && (
+                <div className="space-y-2">
+                  <Label>Quick Select from History</Label>
+                  <ContractSelector
+                    chain={chain}
+                    onSelect={handleContractSelect}
+                  />
+                </div>
+              )}
+
+              {/* Contract Address */}
+              <div className="space-y-2">
+                <Label htmlFor="contractAddress">Contract Address</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="contractAddress"
+                    type="text"
+                    value={contractAddress}
+                    onChange={(e) => setContractAddress(e.target.value)}
+                    placeholder="0x..."
+                    className={apiKeyAvailable ? "flex-1" : ""}
+                  />
+                  {apiKeyAvailable && (
+                    <Button
+                      onClick={handleFetchABI}
+                      variant="secondary"
+                      disabled={fetchABIMutation.isPending || !contractAddress || !chain}
+                      className="shrink-0"
+                    >
+                      {fetchABIMutation.isPending ? (
+                        <>
+                          <Loader2 size={16} className="mr-2 animate-spin" />
+                          Fetching...
+                        </>
+                      ) : (
+                        <>
+                          <Download size={16} className="mr-2" />
+                          Fetch ABI
+                        </>
+                      )}
+                    </Button>
+                  )}
+                </div>
+                {contractAddress && !/^0x[a-fA-F0-9]{40}$/.test(contractAddress) && (
+                  <p className="text-sm text-destructive">Invalid address format</p>
+                )}
+                {fetchABISuccess && (
+                  <Alert className="border-green-400 bg-green-100 text-green-700">
+                    <Check className="h-4 w-4" />
+                    <AlertDescription>{fetchABISuccess}</AlertDescription>
+                  </Alert>
+                )}
+                {isProxyContract && implementationAddress && (
+                  <Alert className="border-blue-400 bg-blue-50 dark:bg-blue-950/30">
+                    <Info className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                    <AlertDescription className="text-blue-700 dark:text-blue-300">
+                      <div className="space-y-1">
+                        <p className="font-semibold">Proxy Contract Information</p>
+                        <p className="text-xs">
+                          Proxy Address: <code className="font-mono">{contractAddress}</code>
+                        </p>
+                        <p className="text-xs">
+                          Implementation: <code className="font-mono">{implementationAddress}</code>
+                        </p>
+                        <p className="text-xs mt-1 text-blue-600 dark:text-blue-400">
+                          The ABI below is from the implementation contract, which contains the actual function definitions.
+                        </p>
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                )}
+                {fetchABIError && (
+                  <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>{fetchABIError}</AlertDescription>
+                  </Alert>
+                )}
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+
+          {/* ABI Input Section */}
+          <Collapsible open={abiInputOpen} onOpenChange={setAbiInputOpen}>
+            <div className="flex items-center justify-between">
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" className="w-full justify-between p-2 h-auto">
+                  <div className="flex items-center gap-2">
+                    {abiInputOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                    <span className="font-semibold">2. Contract ABI</span>
+                  </div>
+                  {!abiInputOpen && parsedFunctions.length > 0 && (
+                    <span className="text-sm text-muted-foreground">
+                      {parsedFunctions.length} function{parsedFunctions.length !== 1 ? 's' : ''} available
+                    </span>
+                  )}
+                </Button>
+              </CollapsibleTrigger>
+            </div>
+            <CollapsibleContent className="space-y-4 mt-4">
+              <div className="space-y-2">
+                <Label htmlFor="abi">Contract ABI</Label>
+                <Textarea
+                  id="abi"
+                  value={abiInput}
+                  onChange={(e) => setAbiInput(e.target.value)}
+                  placeholder='Paste contract ABI JSON here, e.g., [{"type":"function","name":"transfer","inputs":[...],"outputs":[...]}]'
+                  rows={6}
+                  className="font-mono text-sm"
+                />
+                {parseError && (
+                  <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>{parseError}</AlertDescription>
+                  </Alert>
+                )}
+                <Button
+                  onClick={() => handleParseABI()}
+                  variant="secondary"
+                >
+                  Parse ABI
+                </Button>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
+
+          {/* Function Selection Section */}
+          {parsedFunctions.length > 0 && (
+            <Collapsible open={functionSelectionOpen} onOpenChange={setFunctionSelectionOpen}>
+              <div className="flex items-center justify-between">
+                <CollapsibleTrigger asChild>
+                  <Button variant="ghost" className="w-full justify-between p-2 h-auto">
+                    <div className="flex items-center gap-2">
+                      {functionSelectionOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                      <span className="font-semibold">3. Select Function</span>
+                    </div>
+                    {!functionSelectionOpen && selectedFunction && (
+                      <span className="text-sm text-muted-foreground font-mono">
+                        {selectedFunction.name}()
+                      </span>
+                    )}
+                  </Button>
+                </CollapsibleTrigger>
+              </div>
+              <CollapsibleContent className="space-y-4 mt-4">
+                <FunctionSelector
+                  functions={parsedFunctions}
+                  selectedFunction={selectedFunction}
+                  onSelect={handleFunctionSelect}
+                />
+              </CollapsibleContent>
+            </Collapsible>
           )}
 
-          {/* Transaction Preview */}
-          {formattedTransaction && (
-            <div className="space-y-2">
-              <Label>Transaction Preview</Label>
-              <div className="rounded-lg bg-muted/30 p-4">
-                <code className="break-all font-mono text-sm">{formattedTransaction}</code>
+          {/* Function Arguments & Preview */}
+          {selectedFunction && (
+            <div className="space-y-4 border-t pt-4">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold">4. Configure & Review</span>
               </div>
-              <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
-                <Check size={16} />
-                Transaction format valid
-              </div>
+
+              {selectedFunction.inputs.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Function Arguments</Label>
+                  <div className="space-y-3">
+                    {selectedFunction.inputs.map((input, index) => (
+                      <div key={index} className="space-y-2">
+                        <Label htmlFor={`arg_${index}`}>
+                          {input.name || `Parameter ${index + 1}`} ({input.type})
+                        </Label>
+                        <Input
+                          id={`arg_${index}`}
+                          type="text"
+                          value={functionArgs[`arg_${index}`] || ''}
+                          onChange={(e) => handleArgChange(index, e.target.value, input.type)}
+                          placeholder={ABIParser.getTypeDescription(input.type)}
+                          className={errors[`arg_${index}`] ? 'border-destructive' : ''}
+                        />
+                        {errors[`arg_${index}`] && (
+                          <p className="text-sm text-destructive flex items-center gap-1">
+                            <AlertCircle size={14} />
+                            {errors[`arg_${index}`]}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Transaction Preview */}
+              {formattedTransaction && (
+                <div className="space-y-2">
+                  <Label>Transaction Preview</Label>
+                  <div className="rounded-lg bg-muted/30 p-4">
+                    <code className="break-all font-mono text-sm">{formattedTransaction}</code>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+                    <Check size={16} />
+                    Transaction format valid
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
