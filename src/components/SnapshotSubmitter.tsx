@@ -70,7 +70,7 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
   // Use global QI token balance hook (pre-cached on site load)
   const { tokenBalance, isLoading: checkingBalance, requiresTokenBalance, requiredBalance } = useQITokenBalance();
 
-  const formatProposalBody = (rawMarkdown: string, frontmatter: any, transactions?: string[]) => {
+  const formatProposalBody = (rawMarkdown: string, frontmatter: any, transactions?: string | string[]) => {
     // Remove frontmatter from the beginning of the markdown
     let content = rawMarkdown.replace(/^---[\s\S]*?---\n?/, "").trim();
 
@@ -111,12 +111,23 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
     let fullBody = yamlFields.join("\n") + "\n\n" + content;
 
     // Add transactions if present - now supporting multisig-grouped format
-    if (transactions && transactions.length > 0) {
+    if (transactions) {
       fullBody += "\n\n## Transactions\n\n";
 
       try {
-        // Parse the transaction groups (new format) or individual transactions (legacy)
-        const parsed = JSON.parse(transactions[0]);
+        let parsed: any;
+
+        // Handle both string (new) and string[] (old) formats
+        if (typeof transactions === 'string') {
+          // New format: direct string
+          parsed = JSON.parse(transactions);
+        } else if (Array.isArray(transactions) && transactions.length > 0) {
+          // Old format: string array
+          parsed = JSON.parse(transactions[0]);
+        } else {
+          // Invalid format
+          parsed = [];
+        }
 
         // Check if it's the new multisig-grouped format
         if (Array.isArray(parsed) && parsed.length > 0 && 'multisig' in parsed[0] && 'transactions' in parsed[0]) {
@@ -146,9 +157,11 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
         }
       } catch (error) {
         // Fallback: treat as legacy format string array
-        transactions.forEach((tx, index) => {
-          fullBody += `### Transaction ${index + 1}\n\`\`\`\n${tx}\n\`\`\`\n\n`;
-        });
+        if (Array.isArray(transactions)) {
+          transactions.forEach((tx, index) => {
+            fullBody += `### Transaction ${index + 1}\n\`\`\`\n${tx}\n\`\`\`\n\n`;
+          });
+        }
       }
     }
 
@@ -159,10 +172,11 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
 
   // Extract transactions from frontmatter if available
   const extractTransactions = () => {
-    if (frontmatter.transactions && Array.isArray(frontmatter.transactions)) {
+    if (frontmatter.transactions) {
+      // Return as-is (can be string or string[])
       return frontmatter.transactions;
     }
-    return [];
+    return undefined;
   };
 
   const handleSubmit = async () => {

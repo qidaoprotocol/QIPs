@@ -36,7 +36,7 @@ export interface QCIContent {
   proposal: string;
   created: string;
   content: string; // Full markdown content
-  transactions?: string[]; // Optional array of formatted transaction strings
+  transactions?: string | string[]; // Optional transaction string (new) or array (legacy support)
 }
 
 export interface QCI {
@@ -356,30 +356,47 @@ created: ${qciData.created}
 ${qciData.content}`;
 
     // Append transactions if they exist
-    if (qciData.transactions && qciData.transactions.length > 0) {
+    if (qciData.transactions) {
       frontmatter += "\n\n## Transactions\n\n";
       frontmatter += "```json\n";
 
-      // Convert all transactions to proper JSON format
-      const jsonTransactions = qciData.transactions
-        .map((tx) => {
-          if (typeof tx === "string") {
-            // Try to parse if it's already JSON
-            try {
-              return JSON.parse(tx);
-            } catch {
-              // Legacy format or plain string, skip for now
-              return null;
+      // Handle both string (new) and string[] (old) formats
+      if (typeof qciData.transactions === 'string') {
+        // New format: direct string containing JSON
+        try {
+          const parsed = JSON.parse(qciData.transactions);
+          frontmatter += JSON.stringify(parsed, null, 2);
+        } catch (error) {
+          console.error('[qciClient] Failed to parse transaction string:', error);
+          frontmatter += '[]';
+        }
+      } else if (Array.isArray(qciData.transactions) && qciData.transactions.length > 0) {
+        // Old format: string array
+        // Convert all transactions to proper JSON format
+        const jsonTransactions = qciData.transactions
+          .map((tx: any) => {
+            if (typeof tx === "string") {
+              // Try to parse if it's already JSON
+              try {
+                return JSON.parse(tx);
+              } catch {
+                // Legacy format or plain string, skip for now
+                return null;
+              }
+            } else if (typeof tx === "object") {
+              return tx;
             }
-          } else if (typeof tx === "object") {
-            return tx;
-          }
-          return null;
-        })
-        .filter((tx) => tx !== null);
+            return null;
+          })
+          .filter((tx: any) => tx !== null);
 
-      // Format as JSON array
-      frontmatter += JSON.stringify(jsonTransactions, null, 2);
+        // Format as JSON array
+        frontmatter += JSON.stringify(jsonTransactions, null, 2);
+      } else {
+        // Empty or invalid
+        frontmatter += '[]';
+      }
+
       frontmatter += "\n```\n";
     }
 

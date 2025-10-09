@@ -633,14 +633,15 @@ created: ${qciData.created}
 ${qciData.content}`;
 
     // Append transactions if they exist
-    if (qciData.transactions && qciData.transactions.length > 0) {
+    if (qciData.transactions) {
       formatted += '\n\n## Transactions\n\n';
       formatted += '```json\n';
 
-      // Check if transactions[0] is already a stringified array of transaction groups
-      if (qciData.transactions.length === 1 && typeof qciData.transactions[0] === 'string') {
+      // Handle both string (new format) and string[] (old format)
+      if (typeof qciData.transactions === 'string') {
+        // New format: direct string containing JSON
         try {
-          const parsed = JSON.parse(qciData.transactions[0]);
+          const parsed = JSON.parse(qciData.transactions);
           // If it's already an array of transaction groups, use it directly
           if (Array.isArray(parsed)) {
             formatted += JSON.stringify(parsed, null, 2);
@@ -653,25 +654,46 @@ ${qciData.content}`;
           // Fall back to empty array
           formatted += '[]';
         }
-      } else {
-        // Convert all transactions to proper JSON format (legacy/fallback path)
-        const jsonTransactions = qciData.transactions.map(tx => {
-          if (typeof tx === 'string') {
-            // Try to parse if it's already JSON
-            try {
-              return JSON.parse(tx);
-            } catch {
-              // Legacy format or plain string, skip for now
-              return null;
+      } else if (Array.isArray(qciData.transactions) && qciData.transactions.length > 0) {
+        // Old format: string array (legacy support)
+        if (typeof qciData.transactions[0] === 'string') {
+          try {
+            const parsed = JSON.parse(qciData.transactions[0]);
+            // If it's already an array of transaction groups, use it directly
+            if (Array.isArray(parsed)) {
+              formatted += JSON.stringify(parsed, null, 2);
+            } else {
+              // Single transaction object, wrap in array
+              formatted += JSON.stringify([parsed], null, 2);
             }
-          } else if (typeof tx === 'object') {
-            return tx;
+          } catch (error) {
+            console.error('[ipfsService] Failed to parse legacy transaction string:', error);
+            // Fall back to empty array
+            formatted += '[]';
           }
-          return null;
-        }).filter(tx => tx !== null);
+        } else {
+          // Convert all transactions to proper JSON format (legacy/fallback path)
+          const jsonTransactions = qciData.transactions.map(tx => {
+            if (typeof tx === 'string') {
+              // Try to parse if it's already JSON
+              try {
+                return JSON.parse(tx);
+              } catch {
+                // Legacy format or plain string, skip for now
+                return null;
+              }
+            } else if (typeof tx === 'object') {
+              return tx;
+            }
+            return null;
+          }).filter(tx => tx !== null);
 
-        // Format as JSON array
-        formatted += JSON.stringify(jsonTransactions, null, 2);
+          // Format as JSON array
+          formatted += JSON.stringify(jsonTransactions, null, 2);
+        }
+      } else {
+        // Empty or invalid, use empty array
+        formatted += '[]';
       }
 
       formatted += '\n```\n';

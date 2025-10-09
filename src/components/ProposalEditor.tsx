@@ -219,14 +219,14 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
 
         console.log('[TX_DEBUG] ProposalEditor: Grouped transactions:', transactionGroups);
 
-        // Serialize transaction groups as strings for QCIContent
+        // Serialize transaction groups as string for QCIContent
         const serializedTransactions = transactions.length > 0
-          ? [JSON.stringify(transactionGroups, null, 2)]
+          ? JSON.stringify(transactionGroups, null, 2)
           : undefined;
 
-        console.log('[TX_DEBUG] ProposalEditor: Serialized transactions array:', serializedTransactions);
+        console.log('[TX_DEBUG] ProposalEditor: Serialized transactions:', serializedTransactions);
         if (serializedTransactions) {
-          console.log('[TX_DEBUG] ProposalEditor: Serialized transactions[0] length:', serializedTransactions[0].length);
+          console.log('[TX_DEBUG] ProposalEditor: Serialized transactions length:', serializedTransactions.length);
         }
 
         // Create QCI content object
