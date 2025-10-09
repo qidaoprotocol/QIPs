@@ -55,6 +55,8 @@ export const TransactionFormatter: React.FC<TransactionFormatterProps> = ({
   const [contractName, setContractName] = useState('');
   const [isProxyContract, setIsProxyContract] = useState(false);
   const [implementationAddress, setImplementationAddress] = useState('');
+  const [multisigAddress, setMultisigAddress] = useState(editingTransaction?.multisig || '');
+  const [annotation, setAnnotation] = useState(editingTransaction?.annotation || '');
 
   // Collapsible section states
   const [contractSetupOpen, setContractSetupOpen] = useState(true);
@@ -94,6 +96,8 @@ export const TransactionFormatter: React.FC<TransactionFormatterProps> = ({
     if (editingTransaction) {
       setChain(editingTransaction.chain);
       setContractAddress(editingTransaction.contractAddress);
+      setMultisigAddress(editingTransaction.multisig || '');
+      setAnnotation(editingTransaction.annotation || '');
 
       // Set ABI if available in the transaction
       if (editingTransaction.abi && editingTransaction.abi.length > 0) {
@@ -148,6 +152,15 @@ export const TransactionFormatter: React.FC<TransactionFormatterProps> = ({
 
       if (matchingFunction) {
         setSelectedFunction(matchingFunction);
+
+        // Re-populate args after function is selected (to ensure they're not cleared)
+        if (editingTransaction.args) {
+          const args: Record<string, string> = {};
+          editingTransaction.args.forEach((arg, index) => {
+            args[`arg_${index}`] = typeof arg === 'object' ? JSON.stringify(arg) : String(arg);
+          });
+          setFunctionArgs(args);
+        }
       } else {
         // Function not found in ABI - keep function selection open
         console.warn(
@@ -352,7 +365,9 @@ export const TransactionFormatter: React.FC<TransactionFormatterProps> = ({
       contractAddress,
       functionName: selectedFunction.name,
       args,
-      abi
+      abi,
+      multisig: multisigAddress || undefined,
+      annotation: annotation || undefined,
     };
 
     // Save to contract history
@@ -389,6 +404,8 @@ export const TransactionFormatter: React.FC<TransactionFormatterProps> = ({
     setContractName('');
     setIsProxyContract(false);
     setImplementationAddress('');
+    setMultisigAddress('');
+    setAnnotation('');
     setContractSetupOpen(true);
     setAbiInputOpen(true);
     setFunctionSelectionOpen(true);
@@ -626,6 +643,44 @@ export const TransactionFormatter: React.FC<TransactionFormatterProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* Multisig Address */}
+              <div className="space-y-2">
+                <Label htmlFor="multisigAddress">Target Multisig Address</Label>
+                <Input
+                  id="multisigAddress"
+                  type="text"
+                  value={multisigAddress}
+                  onChange={(e) => setMultisigAddress(e.target.value)}
+                  placeholder="0x... (address of the multisig that will execute this transaction)"
+                />
+                {multisigAddress && !/^0x[a-fA-F0-9]{40}$/.test(multisigAddress) && (
+                  <p className="text-sm text-destructive flex items-center gap-1">
+                    <AlertCircle size={14} />
+                    Invalid Ethereum address format
+                  </p>
+                )}
+              </div>
+
+              {/* Annotation */}
+              <div className="space-y-2">
+                <Label htmlFor="annotation">
+                  Annotation <span className="text-muted-foreground text-xs">(optional)</span>
+                </Label>
+                <Textarea
+                  id="annotation"
+                  value={annotation}
+                  onChange={(e) => setAnnotation(e.target.value)}
+                  placeholder="Explain what this transaction does and why it's needed..."
+                  rows={3}
+                  maxLength={500}
+                  className="font-sans text-sm"
+                />
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>Provide context for reviewers and voters</span>
+                  <span>{annotation.length}/500</span>
+                </div>
+              </div>
 
               {/* Transaction Preview */}
               {formattedTransaction && (
