@@ -3,7 +3,7 @@ import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { QCIStatus, DEFAULT_STATUSES } from '@/services/qciClient';
 
-export type StatusType = QCIStatus | 'Draft' | 'Ready for Snapshot' | 'Posted to Snapshot' | 'Archived';
+export type StatusType = QCIStatus | 'Draft' | 'Ready for Snapshot' | 'Posted to Snapshot' | 'Archived' | 'Implemented';
 
 interface StatusBadgeProps extends Omit<BadgeProps, 'variant'> {
   status: StatusType | string;
@@ -29,6 +29,11 @@ const STATUS_CONFIG: Record<number | string, { label: string; className: string 
     label: "Archived",
     className: "bg-gray-500/20 text-gray-600 dark:text-gray-300 hover:bg-gray-500/30 dark:bg-gray-600/30 dark:hover:bg-gray-600/40",
   },
+  // Implemented status (enum value 4)
+  4: {
+    label: "Implemented",
+    className: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/25",
+  },
   // String values for custom statuses
   Draft: {
     label: "Draft",
@@ -45,6 +50,10 @@ const STATUS_CONFIG: Record<number | string, { label: string; className: string 
   Archived: {
     label: "Archived",
     className: "bg-gray-500/20 text-gray-600 dark:text-gray-300 hover:bg-gray-500/30 dark:bg-gray-600/30 dark:hover:bg-gray-600/40",
+  },
+  Implemented: {
+    label: "Implemented",
+    className: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/25",
   },
 };
 

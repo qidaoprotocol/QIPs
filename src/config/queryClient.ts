@@ -59,8 +59,7 @@ export function createQueryClient(): QueryClient {
         placeholderData: (previousData: any) => previousData,
       },
       mutations: {
-        retry: 2,
-        retryDelay: attemptIndex => Math.min(1000 * 2 ** attemptIndex, 30000),
+        retry: false,
       },
     },
   });

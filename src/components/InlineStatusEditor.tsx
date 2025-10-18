@@ -28,6 +28,7 @@ const statusStyles = {
   "Ready for Snapshot": "bg-yellow-100 text-yellow-800 hover:bg-yellow-200",
   "Posted to Snapshot": "bg-green-100 text-green-800 hover:bg-green-200",
   Archived: "bg-gray-500/20 text-gray-400 hover:bg-gray-500/30 dark:bg-gray-600/30 dark:text-gray-300",
+  Implemented: "bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400",
 };
 
 const InlineStatusEditor: React.FC<InlineStatusEditorProps> = ({

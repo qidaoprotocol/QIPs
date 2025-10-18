@@ -8,6 +8,7 @@ export enum QCIStatus {
   ReadyForSnapshot = 1,
   PostedToSnapshot = 2,
   Archived = 3,
+  Implemented = 4,
 }
 
 interface StatusInfo {
@@ -37,6 +38,11 @@ export const STATUS_CONFIG: Record<QCIStatus, StatusInfo> = {
     name: "Archived",
     hash: "0x0d8595aca39f218edf0e157d52bd6f25c54fd84dd4194a1ae097f2f0020dcb90",
     displayName: "Archived",
+  },
+  [QCIStatus.Implemented]: {
+    name: "Implemented",
+    hash: "0x9efb4804baf7642e7ab5be82d82d0c674a47ee5eae9933c3887336b03fdfd96a",
+    displayName: "Implemented",
   },
 };
 
