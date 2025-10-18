@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react'
 import ProposalListItem from '../components/ProposalListItem'
 import { sortBy } from 'lodash/fp'
 import { useQCIData } from '../hooks/useQCIData'
+import { useQIPNumbers } from '../hooks/useQIPNumbers'
 import LocalModeBanner from '../components/LocalModeBanner'
 import CacheStatusIndicator from '../components/CacheStatusIndicator'
 import { StatusGroupSkeleton } from '../components/QCISkeleton'
@@ -19,6 +20,7 @@ const AllProposals: React.FC = () => {
   const [draftsCollapsed, setDraftsCollapsed] = useState(false);
   const [readyForSnapshotCollapsed, setReadyForSnapshotCollapsed] = useState(false);
   const [postedToSnapshotCollapsed, setPostedToSnapshotCollapsed] = useState(false);
+  const [implementedCollapsed, setImplementedCollapsed] = useState(false);
 
   const {
     blockchainQCIs: qcis,
@@ -30,6 +32,9 @@ const AllProposals: React.FC = () => {
   } = useQCIData({
     enabled: true,
   });
+
+  // Fetch QIP numbers for all proposals with Snapshot URLs
+  const qipNumberMap = useQIPNumbers(qcis);
 
   // Handle manual refresh
   const handleRefresh = async () => {
@@ -50,7 +55,8 @@ const AllProposals: React.FC = () => {
         readyForSnapshot: [] as any[]
       },
       qip: {
-        postedToSnapshot: [] as any[]
+        postedToSnapshot: [] as any[],
+        implemented: [] as any[]
       },
       archived: [] as any[]
     };
@@ -69,6 +75,8 @@ const AllProposals: React.FC = () => {
           created: qci.created,
           status: qci.status,
         },
+        // Add QIP number from the map
+        qipNumber: qipNumberMap.get(qci.qciNumber) || null,
       };
 
       // Categorize by status
@@ -82,20 +90,45 @@ const AllProposals: React.FC = () => {
         case "Posted to Snapshot":
           categories.qip.postedToSnapshot.push(proposalData);
           break;
+        case "Implemented":
+          categories.qip.implemented.push(proposalData);
+          break;
         case "Archived":
           categories.archived.push(proposalData);
           break;
       }
     });
 
-    // Sort QCIs within each category by number (descending)
+    // Sort QCI sections by QCI number (descending)
     categories.qci.drafts = sortBy((p) => -p.qciNumber, categories.qci.drafts);
     categories.qci.readyForSnapshot = sortBy((p) => -p.qciNumber, categories.qci.readyForSnapshot);
-    categories.qip.postedToSnapshot = sortBy((p) => -p.qciNumber, categories.qip.postedToSnapshot);
+
+    // Sort QIP sections by QIP number (descending), fallback to QCI number if no QIP number
+    const sortByQIPNumber = (proposals: any[]) => {
+      return proposals.sort((a, b) => {
+        const aQIP = a.qipNumber ?? -1;
+        const bQIP = b.qipNumber ?? -1;
+
+        // If both have QIP numbers, sort by QIP number (descending)
+        if (aQIP !== -1 && bQIP !== -1) {
+          return bQIP - aQIP;
+        }
+
+        // If only one has QIP number, prioritize it
+        if (aQIP !== -1) return -1;
+        if (bQIP !== -1) return 1;
+
+        // If neither has QIP number, sort by QCI number (descending)
+        return b.qciNumber - a.qciNumber;
+      });
+    };
+
+    categories.qip.postedToSnapshot = sortByQIPNumber(categories.qip.postedToSnapshot);
+    categories.qip.implemented = sortByQIPNumber(categories.qip.implemented);
     categories.archived = sortBy((p) => -p.qciNumber, categories.archived);
 
     return categories;
-  }, [qcis]);
+  }, [qcis, qipNumberMap]);
 
 
   return (
@@ -235,7 +268,7 @@ const AllProposals: React.FC = () => {
           )}
 
           {/* QIP Section */}
-          {categorizedQCIs.qip.postedToSnapshot.length > 0 && (
+          {(categorizedQCIs.qip.postedToSnapshot.length > 0 || categorizedQCIs.qip.implemented.length > 0) && (
             <div>
               <h2
                 className="text-3xl font-bold mb-6 flex items-center gap-2 cursor-pointer select-none"
@@ -245,27 +278,58 @@ const AllProposals: React.FC = () => {
                   {qipSectionCollapsed ? <ChevronRight className="h-6 w-6" /> : <ChevronDown className="h-6 w-6" />}
                 </span>
                 ⚡️ QiDao Improvement Proposals (QIP)
-                <span className="text-sm font-normal text-muted-foreground">({categorizedQCIs.qip.postedToSnapshot.length})</span>
+                <span className="text-sm font-normal text-muted-foreground">
+                  ({categorizedQCIs.qip.postedToSnapshot.length + categorizedQCIs.qip.implemented.length})
+                </span>
               </h2>
 
               {!qipSectionCollapsed && (
-                <div className="animate-in slide-in-from-top-2 duration-200 ml-6">
-                  <h3
-                    className="text-xl font-semibold mb-3 flex items-center gap-2 cursor-pointer select-none"
-                    onClick={() => setPostedToSnapshotCollapsed(!postedToSnapshotCollapsed)}
-                  >
-                    <span className="transition-transform duration-200">
-                      {postedToSnapshotCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                    </span>
-                    Posted on Snapshot
-                    <span className="text-sm font-normal text-muted-foreground">({categorizedQCIs.qip.postedToSnapshot.length})</span>
-                  </h3>
-                  <p className="text-sm text-muted-foreground mb-3 ml-6">
-                    Governance in its final form, any user with an aveQI balance can vote to decide the outcome.
-                  </p>
-                  {!postedToSnapshotCollapsed && (
-                    <div className="animate-in slide-in-from-top-2 duration-200">
-                      <ProposalListItem proposals={categorizedQCIs.qip.postedToSnapshot} />
+                <div className="animate-in slide-in-from-top-2 duration-200 ml-6 space-y-6">
+                  {/* Posted to Snapshot Subsection */}
+                  {categorizedQCIs.qip.postedToSnapshot.length > 0 && (
+                    <div>
+                      <h3
+                        className="text-xl font-semibold mb-3 flex items-center gap-2 cursor-pointer select-none"
+                        onClick={() => setPostedToSnapshotCollapsed(!postedToSnapshotCollapsed)}
+                      >
+                        <span className="transition-transform duration-200">
+                          {postedToSnapshotCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                        </span>
+                        Posted on Snapshot
+                        <span className="text-sm font-normal text-muted-foreground">({categorizedQCIs.qip.postedToSnapshot.length})</span>
+                      </h3>
+                      <p className="text-sm text-muted-foreground mb-3 ml-6">
+                        Governance in its final form, any user with an aveQI balance can vote to decide the outcome.
+                      </p>
+                      {!postedToSnapshotCollapsed && (
+                        <div className="animate-in slide-in-from-top-2 duration-200">
+                          <ProposalListItem proposals={categorizedQCIs.qip.postedToSnapshot} />
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Implemented Subsection */}
+                  {categorizedQCIs.qip.implemented.length > 0 && (
+                    <div>
+                      <h3
+                        className="text-xl font-semibold mb-3 flex items-center gap-2 cursor-pointer select-none"
+                        onClick={() => setImplementedCollapsed(!implementedCollapsed)}
+                      >
+                        <span className="transition-transform duration-200">
+                          {implementedCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                        </span>
+                        Implemented
+                        <span className="text-sm font-normal text-muted-foreground">({categorizedQCIs.qip.implemented.length})</span>
+                      </h3>
+                      <p className="text-sm text-muted-foreground mb-3 ml-6">
+                        Proposals that have been successfully implemented and deployed.
+                      </p>
+                      {!implementedCollapsed && (
+                        <div className="animate-in slide-in-from-top-2 duration-200">
+                          <ProposalListItem proposals={categorizedQCIs.qip.implemented} />
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

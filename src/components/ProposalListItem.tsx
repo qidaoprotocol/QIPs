@@ -18,7 +18,7 @@ const ProposalLabel: React.FC<{ qciNumber: number; snapshotProposalId: string | 
   const { qipNumber, hasSnapshot } = useQIPNumber(snapshotProposalId);
 
   if (hasSnapshot && qipNumber) {
-    return <span>QIP {qipNumber}</span>;
+    return <span style={{ color: '#F87171' }}>QIP {qipNumber}</span>;
   }
 
   return <span>QCI {qciNumber}</span>;
