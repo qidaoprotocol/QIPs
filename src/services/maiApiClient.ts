@@ -179,7 +179,8 @@ export class MaiAPIClient {
       0: 'Draft',
       1: 'Ready for Snapshot',
       2: 'Posted to Snapshot',
-      3: 'Archived'
+      3: 'Archived',
+      4: 'Implemented'
     };
 
     return statusMap[status] || `Status ${status}`;

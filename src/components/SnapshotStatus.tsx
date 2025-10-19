@@ -33,7 +33,7 @@ export const SnapshotStatus: React.FC<SnapshotStatusProps> = ({
     );
   }
 
-  if (error || !proposal) {
+  if (error || !proposal || !proposal.space) {
     return null;
   }
 
