@@ -49,7 +49,8 @@
       "WebFetch(domain:ui.shadcn.com)",
       "Bash(ipfs cat:*)",
       "Bash(ast-grep:*)",
-      "WebFetch(domain:docs.etherscan.io)"
+      "WebFetch(domain:docs.etherscan.io)",
+      "Bash(vercel dev --listen 3001)"
     ],
     "deny": [
       "Bash(rm-rf:*)"

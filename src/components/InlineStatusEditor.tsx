@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ChevronDown, Loader2 } from 'lucide-react';
 import { QCIStatus } from '../services/qciClient';
-import { useAllStatuses } from '../hooks/useAllStatuses';
+import { STATUS_CONFIG } from '../config/statusConfig';
 import { useStatusUpdateMutation } from '../hooks/useStatusUpdateMutation';
 import {
   DropdownMenu,
@@ -44,11 +44,11 @@ const InlineStatusEditor: React.FC<InlineStatusEditorProps> = ({
   const statusUpdateMutation = useStatusUpdateMutation();
   const [isOpen, setIsOpen] = useState(false);
 
-  // Use the cached status query
-  const { data: availableStatuses = [], isLoading: statusesLoading } = useAllStatuses({
-    registryAddress,
-    rpcUrl,
-  });
+  // Use hardcoded statuses from config
+  const availableStatuses = Object.values(STATUS_CONFIG).map(status => ({
+    name: status.name,
+    hash: status.hash,
+  }));
 
   const canEdit = isAuthor || isEditor;
 
@@ -109,9 +109,9 @@ const InlineStatusEditor: React.FC<InlineStatusEditorProps> = ({
           className={cn(
             "h-auto py-0.5 px-2.5 font-medium text-xs",
             statusStyles[currentStatus as keyof typeof statusStyles] || "bg-gray-100 text-gray-800",
-            (statusUpdateMutation.isPending || statusesLoading) && "opacity-50 cursor-not-allowed"
+            statusUpdateMutation.isPending && "opacity-50 cursor-not-allowed"
           )}
-          disabled={statusUpdateMutation.isPending || statusesLoading}
+          disabled={statusUpdateMutation.isPending}
         >
           {statusUpdateMutation.isPending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
           {currentStatus}
@@ -119,12 +119,7 @@ const InlineStatusEditor: React.FC<InlineStatusEditorProps> = ({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-48">
-        {statusesLoading ? (
-          <div className="px-2 py-1.5 text-xs text-muted-foreground flex items-center">
-            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-            Loading statuses...
-          </div>
-        ) : otherStatuses.length === 0 ? (
+        {otherStatuses.length === 0 ? (
           <div className="px-2 py-1.5 text-xs text-muted-foreground">No other statuses available</div>
         ) : (
           <>
