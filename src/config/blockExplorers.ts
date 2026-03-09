@@ -10,6 +10,7 @@ import {
   polygonZkEvm,
   linea,
   metis,
+  fraxtal,
 } from 'viem/chains';
 import type { Chain } from 'viem';
 import type { BlockExplorerConfig } from '../types/abi';
@@ -20,8 +21,8 @@ import { getEtherscanApiKey } from '../utils/settings';
  */
 const CHAIN_MAP: Record<string, Chain> = {
   'Ethereum': mainnet,
-  'Polygon': polygon,
   'Polygon PoS': polygon,
+  'Polygon': polygon,
   'Base': base,
   'Arbitrum': arbitrum,
   'Optimism': optimism,
@@ -33,6 +34,7 @@ const CHAIN_MAP: Record<string, Chain> = {
   'Polygon zkEVM': polygonZkEvm,
   'Linea': linea,
   'Metis': metis,
+  'Fraxtal': fraxtal,
 };
 
 /**
@@ -47,8 +49,8 @@ const SPECIAL_API_KEY_CHAINS = new Set(['Metis']);
  */
 const CHAIN_IDS: Record<string, number> = {
   'Ethereum': 1,
-  'Polygon': 137,
   'Polygon PoS': 137,
+  'Polygon': 137,
   'Base': 8453,
   'Arbitrum': 42161,
   'Optimism': 10,
@@ -60,6 +62,7 @@ const CHAIN_IDS: Record<string, number> = {
   'Polygon zkEVM': 1101,
   'Linea': 59144,
   'Metis': 1088,
+  'Fraxtal': 252,
 };
 
 /**
@@ -80,12 +83,12 @@ const FALLBACK_EXPLORERS: Record<string, Partial<BlockExplorerConfig>> = {
     url: 'https://etherscan.io',
     name: 'Etherscan',
   },
-  'Polygon': {
+  'Polygon PoS': {
     apiUrl: 'https://api.etherscan.io/v2/api',
     url: 'https://polygonscan.com',
     name: 'Polygonscan',
   },
-  'Polygon PoS': {
+  'Polygon': {
     apiUrl: 'https://api.etherscan.io/v2/api',
     url: 'https://polygonscan.com',
     name: 'Polygonscan',
@@ -144,6 +147,11 @@ const FALLBACK_EXPLORERS: Record<string, Partial<BlockExplorerConfig>> = {
     apiUrl: 'https://api.etherscan.io/v2/api',
     url: 'https://lineascan.build',
     name: 'Lineascan',
+  },
+  'Fraxtal': {
+    apiUrl: 'https://api.fraxscan.com/api',
+    url: 'https://fraxscan.com',
+    name: 'Fraxscan',
   },
 };
 

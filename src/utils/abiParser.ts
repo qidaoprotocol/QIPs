@@ -189,7 +189,7 @@ export class ABIParser {
     // Map chain names to chain IDs
     const chainIdMap: Record<string, number> = {
       'Ethereum': 1,
-      'Polygon': 137,
+      'Polygon PoS': 137,
       'Base': 8453,
       'Arbitrum': 42161,
       'Optimism': 10,
@@ -197,7 +197,7 @@ export class ABIParser {
       'Binance': 56, // Alias
       'Avalanche': 43114,
       'Metis': 1088,
-      // Add more as needed
+      'Fraxtal': 252,
     };
 
     // Get chain ID, fallback to chain name if not found
@@ -242,13 +242,14 @@ export class ABIParser {
     // Map chain IDs back to chain names
     const chainNameMap: Record<number, string> = {
       1: 'Ethereum',
-      137: 'Polygon',
+      137: 'Polygon PoS',
       8453: 'Base',
       42161: 'Arbitrum',
       10: 'Optimism',
       56: 'BSC',
       43114: 'Avalanche',
       1088: 'Metis',
+      252: 'Fraxtal',
     };
 
     // First, try to parse as JSON (new format)

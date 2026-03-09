@@ -41,7 +41,7 @@ export const TransactionFormatter: React.FC<TransactionFormatterProps> = ({
   networks,
   editingTransaction
 }) => {
-  const [chain, setChain] = useState(editingTransaction?.chain || 'Polygon');
+  const [chain, setChain] = useState(editingTransaction?.chain || 'Polygon PoS');
   const [contractAddress, setContractAddress] = useState(editingTransaction?.contractAddress || '');
   const [abiInput, setAbiInput] = useState('');
   const [parsedFunctions, setParsedFunctions] = useState<ParsedFunction[]>([]);
@@ -390,7 +390,7 @@ export const TransactionFormatter: React.FC<TransactionFormatterProps> = ({
   };
 
   const handleClose = () => {
-    setChain('Polygon');
+    setChain('Polygon PoS');
     setContractAddress('');
     setAbiInput('');
     setParsedFunctions([]);
