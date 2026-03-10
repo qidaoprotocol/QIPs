@@ -34,6 +34,7 @@ const DEFAULT_NETWORKS = [
   "Optimism",
   "Arbitrum",
   "Avalanche",
+  "Fraxtal",
   "Polygon zkEVM",
   "Gnosis",
   "Kava",

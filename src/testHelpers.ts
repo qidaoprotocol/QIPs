@@ -16,7 +16,7 @@ export enum QCIStatus {
 export const QCITemplates = {
   technicalUpgrade: {
     title: 'Protocol Technical Upgrade',
-    networks: ['Polygon', 'Ethereum', 'Base', 'Arbitrum'],
+    networks: ['Polygon PoS', 'Ethereum', 'Base', 'Arbitrum'],
     contentTemplate: (qciNumber: number) => `# QCI-${qciNumber}: Protocol Technical Upgrade
 
 ## Summary
@@ -53,7 +53,7 @@ The implementation will be carried out in phases:
   
   economicProposal: {
     title: 'Economic Parameter Adjustment',
-    networks: ['Polygon', 'Base'],
+    networks: ['Polygon PoS', 'Base'],
     contentTemplate: (qciNumber: number) => `# QCI-${qciNumber}: Economic Parameter Adjustment
 
 ## Summary

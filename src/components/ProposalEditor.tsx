@@ -88,7 +88,7 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
 
   const [title, setTitle] = useState(existingQCI?.content.title || importedData?.title || initialTitle || "");
   const [combooxSelectedChain, setComboboxSelectedChain] = useState(
-    existingQCI?.content.chain || importedData?.chain || initialChain || "Polygon"
+    existingQCI?.content.chain || importedData?.chain || initialChain || "Polygon PoS"
   );
   const [content, setContent] = useState(
     existingQCI?.content.content

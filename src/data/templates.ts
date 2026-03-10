@@ -14,7 +14,7 @@ export const templates: Template[] = [
     name: 'General QCI Template',
     description: 'For protocol improvements and changes',
     title: 'General template',
-    chain: 'Polygon',
+    chain: 'Polygon PoS',
     implementor: 'None',
     content: `### Summary
 
@@ -49,7 +49,7 @@ Please list all values configurable under this implementation, if applicable.`
     name: 'New Asset Template',
     description: 'For adding new collateral assets to QiDAO',
     title: 'Add [Asset Name] as Collateral',
-    chain: 'Polygon',
+    chain: 'Polygon PoS',
     implementor: 'None',
     content: `### Summary
 
