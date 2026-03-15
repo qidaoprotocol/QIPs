@@ -1,34 +1,11 @@
 import type { MultisigTransactionGroup } from './transactionParser';
-
-/**
- * Chain explorer URL mappings
- */
-export const CHAIN_EXPLORERS: Record<string, string> = {
-  'Ethereum': 'https://etherscan.io/address/',
-  'Polygon PoS': 'https://polygonscan.com/address/',
-  'Polygon': 'https://polygonscan.com/address/',
-  'Base': 'https://basescan.org/address/',
-  'Arbitrum': 'https://arbiscan.io/address/',
-  'Optimism': 'https://optimistic.etherscan.io/address/',
-  'BSC': 'https://bscscan.com/address/',
-  'BNB': 'https://bscscan.com/address/',
-  'Binance': 'https://bscscan.com/address/',
-  'Avalanche': 'https://snowtrace.io/address/',
-  'Metis': 'https://andromeda-explorer.metis.io/address/',
-  'Gnosis': 'https://gnosisscan.io/address/',
-  'Gnosis Chain': 'https://gnosisscan.io/address/',
-  'Linea': 'https://lineascan.build/address/',
-  'Polygon zkEVM': 'https://zkevm.polygonscan.com/address/',
-  'Kava': 'https://kavascan.com/address/',
-  'Fraxtal': 'https://fraxscan.com/address/'
-};
+import { getExplorerAddressUrl } from '../config/proposalChains';
 
 /**
  * Get the block explorer URL for a given chain and address
  */
 export function getChainExplorerUrl(chain: string, address: string): string | null {
-  const explorerBase = CHAIN_EXPLORERS[chain];
-  return explorerBase ? `${explorerBase}${address}` : null;
+  return getExplorerAddressUrl(chain, address);
 }
 
 /**

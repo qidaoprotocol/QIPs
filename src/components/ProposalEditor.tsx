@@ -21,6 +21,7 @@ import { groupTransactionsByMultisig } from "../utils/transactionParser";
 import { Plus } from "lucide-react";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { getAllChainNames } from '@/config/proposalChains';
 
 interface ProposalEditorProps {
   registryAddress: Address;
@@ -34,21 +35,6 @@ interface ProposalEditorProps {
   initialContent?: string;
   initialImplementor?: string;
 }
-
-const NETWORKS = [
-  "Ethereum",
-  "Base",
-  "Polygon PoS",
-  "Linea",
-  "BNB",
-  "Metis",
-  "Optimism",
-  "Arbitrum",
-  "Avalanche",
-  "Polygon zkEVM",
-  "Gnosis",
-  "Kava",
-];
 
 export const ProposalEditor: React.FC<ProposalEditorProps> = ({
   registryAddress,
@@ -511,7 +497,7 @@ Implementation details...`}
           setEditingTransactionIndex(null);
         }}
         onAdd={handleAddTransaction}
-        networks={NETWORKS}
+        networks={getAllChainNames()}
         editingTransaction={editingTransactionIndex !== null ? transactions[editingTransactionIndex] : undefined}
       />
     </div>

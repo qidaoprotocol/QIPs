@@ -1,6 +1,7 @@
 import { QCIExportData } from "@/services/qciClient";
 import { type QCIData } from "../hooks/useQCIData";
 import { toast } from "sonner";
+import { getAllChainNames } from "../config/proposalChains";
 
 export interface QCIExportJSON {
   metadata: {
@@ -192,21 +193,8 @@ export function validateImportData(data: any): { valid: boolean; errors: string[
     }
   }
 
-  // Validate chain value
-  const validChains = [
-    "Ethereum",
-    "Base",
-    "Polygon PoS",
-    "Linea",
-    "BNB",
-    "Metis",
-    "Optimism",
-    "Arbitrum",
-    "Avalanche",
-    "Polygon zkEVM",
-    "Gnosis",
-    "Kava",
-  ];
+  // Validate chain value against registry
+  const validChains = getAllChainNames();
   if (qci.chain && !validChains.includes(qci.chain)) {
     errors.push(`Invalid chain: ${qci.chain}. Must be one of: ${validChains.join(", ")}`);
   }
