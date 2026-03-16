@@ -14,6 +14,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import { getAllChainNames } from '@/config/proposalChains';
 
 interface ChainComboboxProps {
   value: string;
@@ -23,22 +24,7 @@ interface ChainComboboxProps {
   disabled?: boolean;
 }
 
-const DEFAULT_NETWORKS = [
-  "All Chains",
-  "Ethereum",
-  "Base",
-  "Polygon PoS",
-  "Linea",
-  "BNB",
-  "Metis",
-  "Optimism",
-  "Arbitrum",
-  "Avalanche",
-  "Fraxtal",
-  "Polygon zkEVM",
-  "Gnosis",
-  "Kava",
-];
+const DEFAULT_NETWORKS = ["All Chains", ...getAllChainNames()];
 
 export function ChainCombobox({
   value,

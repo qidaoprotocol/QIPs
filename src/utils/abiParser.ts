@@ -1,4 +1,5 @@
 import { type Abi, type AbiFunction, parseAbi } from 'viem';
+import { getChainByName, getChainById } from '../config/proposalChains';
 
 export interface ParsedFunction {
   name: string;
@@ -186,22 +187,9 @@ export class ABIParser {
    * Format transaction data as a JSON string for structured storage
    */
   static formatTransaction(data: TransactionData): string {
-    // Map chain names to chain IDs
-    const chainIdMap: Record<string, number> = {
-      'Ethereum': 1,
-      'Polygon PoS': 137,
-      'Base': 8453,
-      'Arbitrum': 42161,
-      'Optimism': 10,
-      'BSC': 56,
-      'Binance': 56, // Alias
-      'Avalanche': 43114,
-      'Metis': 1088,
-      'Fraxtal': 252,
-    };
-
-    // Get chain ID, fallback to chain name if not found
-    const chainId = chainIdMap[data.chain] || data.chain;
+    // Get chain ID from registry, fallback to chain name if not found
+    const chain = getChainByName(data.chain);
+    const chainId = chain?.chainId || data.chain;
 
     // Create a structured transaction object (ABI is NOT stored to keep size small)
     const transaction: Record<string, any> = {
@@ -239,19 +227,6 @@ export class ABIParser {
    * Supports both new JSON format and legacy colon-separated format
    */
   static parseTransaction(transactionString: string): TransactionData {
-    // Map chain IDs back to chain names
-    const chainNameMap: Record<number, string> = {
-      1: 'Ethereum',
-      137: 'Polygon PoS',
-      8453: 'Base',
-      42161: 'Arbitrum',
-      10: 'Optimism',
-      56: 'BSC',
-      43114: 'Avalanche',
-      1088: 'Metis',
-      252: 'Fraxtal',
-    };
-
     // First, try to parse as JSON (new format)
     try {
       const parsed = JSON.parse(transactionString);
@@ -260,11 +235,12 @@ export class ABIParser {
         let chain = parsed.chain;
         if (parsed.chainId) {
           if (typeof parsed.chainId === 'number') {
-            // Numeric chainId - map to chain name
-            chain = chainNameMap[parsed.chainId] || `Chain ${parsed.chainId}`;
+            const resolved = getChainById(parsed.chainId);
+            chain = resolved?.name || `Chain ${parsed.chainId}`;
           } else if (typeof parsed.chainId === 'string') {
-            // String chainId like "Polygon PoS" - use directly
-            chain = parsed.chainId;
+            // String chainId like "Polygon PoS" - resolve via registry for canonical name
+            const resolved = getChainByName(parsed.chainId);
+            chain = resolved?.name || parsed.chainId;
           }
         }
 
