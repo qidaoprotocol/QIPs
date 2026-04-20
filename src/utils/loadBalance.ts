@@ -1,7 +1,12 @@
 import { type Transport, type TransportConfig, createTransport } from "viem";
 
+const COOLDOWN_MS = 30_000;
+
 /**
- * @description Creates a load balanced transport that spreads requests between child transports using a round robin algorithm.
+ * @description Creates a load balanced transport that spreads requests between
+ * child transports using round robin, and fails over to the next available
+ * transport when one rejects. Failed slots are placed in a short cooldown so
+ * subsequent requests skip them until they're likely healthy again.
  */
 export const loadBalance = (_transports: Transport[]): Transport => {
   return ({ chain, retryCount, timeout }) => {
@@ -12,15 +17,56 @@ export const loadBalance = (_transports: Transport[]): Transport => {
     );
 
     let index = 0;
+    const cooldownUntil = new Map<number, number>();
+
+    const isAvailable = (slot: number): boolean => {
+      const until = cooldownUntil.get(slot);
+      if (until === undefined) return true;
+      if (Date.now() >= until) {
+        cooldownUntil.delete(slot);
+        return true;
+      }
+      return false;
+    };
 
     return createTransport({
       key: "loadBalance",
       name: "Load Balance",
-      request: (body) => {
-        const response = transports[index++]!.request(body);
-        if (index === transports.length) index = 0;
+      request: async (body) => {
+        const start = index;
+        index = (index + 1) % transports.length;
 
-        return response;
+        let lastError: unknown;
+        let triedAny = false;
+
+        // First pass: only hit slots that aren't cooling down.
+        for (let i = 0; i < transports.length; i++) {
+          const slot = (start + i) % transports.length;
+          if (!isAvailable(slot)) continue;
+          triedAny = true;
+          try {
+            return await transports[slot]!.request(body);
+          } catch (err) {
+            lastError = err;
+            cooldownUntil.set(slot, Date.now() + COOLDOWN_MS);
+          }
+        }
+
+        // If every slot was in cooldown, try them anyway so we don't strand
+        // callers when all endpoints are simultaneously degraded.
+        if (!triedAny) {
+          for (let i = 0; i < transports.length; i++) {
+            const slot = (start + i) % transports.length;
+            try {
+              return await transports[slot]!.request(body);
+            } catch (err) {
+              lastError = err;
+              cooldownUntil.set(slot, Date.now() + COOLDOWN_MS);
+            }
+          }
+        }
+
+        throw lastError;
       },
       retryCount,
       timeout,
@@ -35,13 +81,44 @@ export const loadBalance = (_transports: Transport[]): Transport => {
  */
 export const BASE_RPC_ENDPOINTS = [
   "https://mainnet.base.org",
-  "https://base.llamarpc.com",
   "https://base-mainnet.public.blastapi.io",
   "https://base.blockpi.network/v1/rpc/public",
   "https://base.meowrpc.com",
   "https://base.publicnode.com",
   "https://1rpc.io/base",
 ];
+
+/**
+ * Ethereum mainnet RPC endpoints.
+ * Used for cross-chain reads like the QI token balance check on L1.
+ */
+export const ETH_RPC_ENDPOINTS = [
+  "https://eth.llamarpc.com",
+  "https://ethereum-rpc.publicnode.com",
+  "https://eth.drpc.org",
+  "https://rpc.ankr.com/eth",
+  "https://1rpc.io/eth",
+  "https://eth.meowrpc.com",
+];
+
+/**
+ * Get Ethereum mainnet RPC endpoints. Honors `VITE_MAINNET_RPC_URL`
+ * (single) or `VITE_MAINNET_RPC_URLS` (comma-separated) if set, otherwise
+ * falls back to the public list above.
+ */
+export function getEthRPCEndpoints(): string[] {
+  if (typeof import.meta !== "undefined") {
+    const urls = import.meta.env?.VITE_MAINNET_RPC_URLS;
+    if (typeof urls === "string" && urls.length > 0) {
+      return urls.split(",").map((u) => u.trim()).filter(Boolean);
+    }
+    const single = import.meta.env?.VITE_MAINNET_RPC_URL;
+    if (typeof single === "string" && single.length > 0 && !ETH_RPC_ENDPOINTS.includes(single)) {
+      return [single, ...ETH_RPC_ENDPOINTS];
+    }
+  }
+  return ETH_RPC_ENDPOINTS;
+}
 
 /**
  * Get RPC endpoints from environment or use defaults

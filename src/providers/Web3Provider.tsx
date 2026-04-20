@@ -11,16 +11,21 @@ import { useTheme } from "../providers/ThemeProvider";
 import { queryKeys } from "../utils/queryKeys";
 import { QCIClient } from "../services/qciClient";
 import { ALL_STATUS_NAMES, ALL_STATUS_HASHES } from "../config/statusConfig";
+import { loadBalance, getEthRPCEndpoints } from "../utils/loadBalance";
 
 // Get chains from config
 const chains = getChains();
+
+// Load-balanced transport for Ethereum mainnet (used by the QI token
+// balance check on L1). Uses the same failover + cooldown strategy as Base.
+const mainnetTransport = loadBalance(getEthRPCEndpoints().map((url) => http(url)));
 
 // Transports configuration
 const transports = {
   [localBaseFork.id]: http(config.baseRpcUrl),
   [8453]: http(config.baseRpcUrl), // Base
   [84532]: http(), // Base Sepolia
-  [mainnet.id]: http(),
+  [mainnet.id]: mainnetTransport,
 };
 
 // Wagmi configuration
