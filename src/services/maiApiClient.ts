@@ -304,6 +304,58 @@ export class MaiAPIClient {
     ) as Promise<ModerationResponse>;
   }
 
+  /* ─────────────────────────────────────────────────────────
+     QIP comments — Safe deployment lookup
+     ───────────────────────────────────────────────────────── */
+
+  /**
+   * Look up which chains an address is deployed on as a Safe.
+   *
+   * Server probes mainnet, polygon, base, and linea via on-chain RPC
+   * (eth_getCode + Safe ABI multicall) with results cached in Redis for
+   * 90 days. The frontend uses the `deployedOn` list to pick the right
+   * chainId for the SIWE message — load-bearing for EIP-1271 verification.
+   *
+   * `unknown` lists chains where the lookup couldn't conclude (RPC down,
+   * env var missing); the caller's job is to treat unknown chains the
+   * same as not-yet-probed and fall back to the wallet's reported chain.
+   */
+  async getSafeDeployments(
+    address: string,
+  ): Promise<{
+    address: string;
+    deployedOn: number[];
+    unknown: number[];
+    details: Record<
+      number,
+      { version: string; threshold: number; ownerCount: number }
+    >;
+  }> {
+    const url = `${this.baseUrl}/v2/safe-deployments?address=${encodeURIComponent(
+      address,
+    )}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      credentials: 'omit',
+      signal: AbortSignal.timeout(this.defaultTimeout),
+    });
+    if (!response.ok) {
+      throw new Error(
+        `Mai API request failed: ${response.status} ${response.statusText}`,
+      );
+    }
+    return (await response.json()) as {
+      address: string;
+      deployedOn: number[];
+      unknown: number[];
+      details: Record<
+        number,
+        { version: string; threshold: number; ownerCount: number }
+      >;
+    };
+  }
+
   /** Editor-only: unhide a previously hidden comment. */
   async unhideQipComment(req: ModerationRequest): Promise<ModerationResponse> {
     return this.commentsResultRequest<ModerationResponse>(
