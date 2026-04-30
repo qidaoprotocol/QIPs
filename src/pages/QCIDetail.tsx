@@ -23,6 +23,7 @@ import { useQIPNumber } from '../hooks/useQIPNumber'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { config } from '../config/env'
+import { Comments } from '../components/Comments'
 import { extractTransactionsFromMarkdown } from '../utils/transactionParser'
 import { TransactionGroup } from '../components/TransactionGroup'
 
@@ -505,6 +506,8 @@ const QCIDetail: React.FC = () => {
             )}
           </div>
         )}
+
+        <Comments qciId={qciData.qciNumber} />
       </div>
     </div>
   );
