@@ -22,6 +22,7 @@ import SnapshotModerator from "../components/SnapshotModerator";
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { config } from '../config/env'
+import { Comments } from '../components/Comments'
 
 const QCIDetail: React.FC = () => {
   const { qciNumber } = useParams<{ qciNumber: string }>()
@@ -528,6 +529,8 @@ const QCIDetail: React.FC = () => {
             )}
           </div>
         )}
+
+        <Comments qciId={qciData.qciNumber} />
       </div>
     </div>
   );
