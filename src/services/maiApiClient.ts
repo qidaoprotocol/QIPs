@@ -253,10 +253,15 @@ export class MaiAPIClient {
       headers.Authorization = `Bearer ${opts.sessionToken}`;
     }
 
+    // GET is anonymous-by-default — the comment list does not require
+    // auth. Use credentials: 'omit' so cross-origin reads aren't blocked
+    // by the CORS preflight against `Access-Control-Allow-Origin: *`
+    // (browsers reject `*` + `credentials: include`). Same-origin reads
+    // don't need cookies for this route.
     const response = await fetch(url, {
       method: 'GET',
       headers,
-      credentials: opts.sessionToken ? 'omit' : 'include',
+      credentials: 'omit',
       signal: AbortSignal.timeout(this.defaultTimeout),
     });
 
