@@ -7,7 +7,7 @@
   "author": "Tekrajs & Publu",
   "keywords": [],
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host ${HOST:-127.0.0.1} --port ${PORT:-3000}",
     "dev:local": "./scripts/start-pure-local.sh",
     "dev:local:migrate": "./scripts/start-pure-local.sh --migrate",
     "dev:api": "./scripts/start-api-mode.sh",
