@@ -3,7 +3,7 @@ import { WagmiProvider, createConfig, http } from "wagmi";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { ConnectKitProvider } from "connectkit";
-import { mainnet } from "wagmi/chains";
+import { arbitrum, base, baseSepolia, gnosis, mainnet, optimism, polygon } from "wagmi/chains";
 import { injected, walletConnect } from "wagmi/connectors";
 import { config, getChains, getDefaultChainId, localBaseFork } from "../config";
 import { createQueryClient, setupPersistentCache, clearQCICacheOnFreshLoad, CACHE_TIMES } from "../config/queryClient";
@@ -15,12 +15,27 @@ import { ALL_STATUS_NAMES, ALL_STATUS_HASHES } from "../config/statusConfig";
 // Get chains from config
 const chains = getChains();
 
-// Transports configuration
+// Optional per-chain RPC overrides. Empty string falls through to viem's
+// chain-default public RPC, which is fine for the connect-time reads we do
+// on the comments path (low volume); the SIWE-verify hot path runs on
+// mai-api with paid RPCs configured per chain via QIP_COMMENTS_RPC_URL_<id>.
+const rpcEnv = (key: string): string | undefined => {
+  const value = (import.meta as any)?.env?.[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+};
+
+// Transports — mirror getChains() so every chain in the allowlist has an
+// http transport. Chains here MUST stay in sync with src/config/chains.ts;
+// missing entries silently break wagmi reads on that chain.
 const transports = {
   [localBaseFork.id]: http(config.baseRpcUrl),
-  [8453]: http(config.baseRpcUrl), // Base
-  [84532]: http(), // Base Sepolia
-  [mainnet.id]: http(),
+  [base.id]: http(rpcEnv("VITE_BASE_RPC_URL") ?? config.baseRpcUrl),
+  [baseSepolia.id]: http(rpcEnv("VITE_BASE_SEPOLIA_RPC_URL")),
+  [mainnet.id]: http(rpcEnv("VITE_MAINNET_RPC_URL")),
+  [optimism.id]: http(rpcEnv("VITE_OPTIMISM_RPC_URL")),
+  [gnosis.id]: http(rpcEnv("VITE_GNOSIS_RPC_URL")),
+  [polygon.id]: http(rpcEnv("VITE_POLYGON_RPC_URL")),
+  [arbitrum.id]: http(rpcEnv("VITE_ARBITRUM_RPC_URL")),
 };
 
 // Wagmi configuration

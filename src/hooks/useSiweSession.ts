@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
-import { useAccount, useSignMessage } from 'wagmi';
+import { useAccount, useChainId, useSignMessage } from 'wagmi';
 import { SiweMessage } from 'siwe';
 import { getMaiAPIClient } from '../services/maiApiClient';
 import { config } from '../config/env';
@@ -39,13 +39,6 @@ export interface UseSiweSessionResult {
 
 const STATEMENT = 'Sign in to leave a comment on this QIP.';
 const NONCE_TTL_SECONDS = 10 * 60;
-/**
- * The Snapshot space we vote on lives on Ethereum mainnet. Keeping the
- * SIWE message's chainId at 1 makes the wallet pop-up display the
- * familiar mainnet network name; the actual on-chain chain the wallet
- * is connected to is not relevant to a SIWE attestation.
- */
-const SIWE_CHAIN_ID = 1;
 
 /* ─────────────────────────────────────────────────────────
    Shared session state (module-scoped singleton)
@@ -86,6 +79,12 @@ function subscribeSessionState(listener: () => void): () => void {
 
 export function useSiweSession(): UseSiweSessionResult {
   const { address: walletAddress, isConnected } = useAccount();
+  // EIP-4361 requires a chainId in the SIWE message; for EOAs it is
+  // informational, but for smart-account signers (Safe and other EIP-1271
+  // wallets) it tells the verifier which chain's RPC to query for
+  // `isValidSignature`. Reading the wallet's actual chain — not a
+  // hardcoded constant — is what lets a Safe on Polygon sign here.
+  const walletChainId = useChainId();
   const { signMessageAsync } = useSignMessage();
 
   const state = useSyncExternalStore(
@@ -136,7 +135,7 @@ export function useSiweSession(): UseSiweSessionResult {
         statement: STATEMENT,
         uri: window.location.origin,
         version: '1',
-        chainId: SIWE_CHAIN_ID,
+        chainId: walletChainId,
         nonce: nonceResp.nonce,
         issuedAt: issuedAt.toISOString(),
         expirationTime: expirationTime.toISOString(),
@@ -185,7 +184,7 @@ export function useSiweSession(): UseSiweSessionResult {
       setSessionState({ ...sessionState, status: 'idle' });
       return { ok: false, reason: 'unknown' };
     }
-  }, [isConnected, walletAddress, signMessageAsync]);
+  }, [isConnected, walletAddress, walletChainId, signMessageAsync]);
 
   const signOut = useCallback(() => {
     setSessionState({ status: 'idle', sessionToken: undefined, address: undefined });
