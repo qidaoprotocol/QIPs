@@ -326,6 +326,15 @@ export class MaiAPIClient {
   /**
    * Fire a JSON request and throw on any non-2xx — used for the auth
    * endpoints where every failure is fatal to the flow.
+   *
+   * Uses credentials: 'omit' because the API responds with
+   * Access-Control-Allow-Origin: *, which Chrome refuses to honor for
+   * credentialed cross-origin requests (response is dropped with
+   * net::ERR_FAILED). The verify response body returns the bearer token,
+   * which is the primary auth mechanism; the Set-Cookie returned alongside
+   * is only useful for same-origin deployments. Same-origin browsers can
+   * still use cookies with `credentials: 'same-origin'` (the default), but
+   * cross-origin must rely on the Bearer header.
    */
   private async commentsJsonRequest<T>(
     method: string,
@@ -338,7 +347,7 @@ export class MaiAPIClient {
         'Content-Type': 'application/json',
         Accept: 'application/json',
       },
-      credentials: 'include',
+      credentials: 'omit',
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(this.defaultTimeout),
     });
@@ -381,12 +390,15 @@ export class MaiAPIClient {
       headers.Authorization = `Bearer ${sessionToken}`;
     }
 
+    // credentials: 'omit' — see commentsJsonRequest above for why this
+    // matters cross-origin against `Access-Control-Allow-Origin: *`. Bearer
+    // is the cross-origin auth path; same-origin clients can switch to
+    // 'same-origin' (the default) for a cookie path if/when we land
+    // origin-specific CORS.
     const response = await fetch(`${this.baseUrl}${path}`, {
       method,
       headers,
-      // Bearer wins when present — don't also send the cookie. Cookie
-      // travels only when no token is supplied (same-origin path).
-      credentials: sessionToken ? 'omit' : 'include',
+      credentials: 'omit',
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(this.defaultTimeout),
     });
