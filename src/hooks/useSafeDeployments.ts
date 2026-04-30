@@ -45,13 +45,11 @@ const SAFE_TX_SERVICE_HOSTS: Readonly<Record<number, string>> = {
 };
 
 const PROBE_TIMEOUT_MS = 6000;
+const PROBE_RETRY_DELAYS_MS = [1000, 3000] as const;
 
-async function probeOne(
-  chainId: number,
-  host: string,
-  address: string,
-): Promise<'deployed' | 'not_deployed' | 'unknown'> {
-  const url = `https://${host}/api/v1/safes/${address}/`;
+async function fetchOne(
+  url: string,
+): Promise<'deployed' | 'not_deployed' | 'rate_limited' | 'unknown'> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
   try {
@@ -62,13 +60,42 @@ async function probeOne(
     });
     if (res.status === 200) return 'deployed';
     if (res.status === 404) return 'not_deployed';
-    // Anything else (429, 5xx, CORS) — we don't know.
+    // 429 is common in burst — retryable.
+    if (res.status === 429) return 'rate_limited';
+    // 5xx is also worth a retry, but treat the same conservatively.
+    if (res.status >= 500 && res.status < 600) return 'rate_limited';
     return 'unknown';
   } catch {
-    // Network failure or timeout — we don't know.
-    return 'unknown';
+    // Network failure or timeout — also retryable.
+    return 'rate_limited';
   } finally {
     clearTimeout(timer);
+  }
+}
+
+async function probeOne(
+  chainId: number,
+  host: string,
+  address: string,
+): Promise<'deployed' | 'not_deployed' | 'unknown'> {
+  void chainId;
+  const url = `https://${host}/api/v1/safes/${address}/`;
+  // First attempt + per-chain retries with backoff. The retry budget is
+  // small on purpose: in production the hook fires once per session per
+  // address, and any retry tax is absorbed by the wallet sign-in latency
+  // that happens after.
+  for (let attempt = 0; ; attempt++) {
+    const outcome = await fetchOne(url);
+    if (outcome !== 'rate_limited') {
+      return outcome;
+    }
+    const delay = PROBE_RETRY_DELAYS_MS[attempt];
+    if (delay === undefined) {
+      // Exhausted retries — treat as unknown so the caller can fall back
+      // to the wallet's reported chainId.
+      return 'unknown';
+    }
+    await new Promise((r) => setTimeout(r, delay));
   }
 }
 
@@ -99,6 +126,12 @@ async function probeAllChains(address: string): Promise<SafeDeployments> {
  * any allowlisted chain (treat as EOA). Empty `deployedOn` with a non-empty
  * `unknown` means we couldn't fully probe — consumers should fall back to
  * the wallet's reported chainId rather than assume EOA.
+ *
+ * NOTE: Safe Transaction Service rejects lowercase addresses with HTTP 422
+ * ("Checksum address validation failed"). The address must be passed in
+ * its EIP-55-checksummed form. wagmi's `useAccount().address` is already
+ * checksummed; we cache by the lowercased form for stable React Query
+ * keys but pass the original to the endpoint.
  */
 export function useSafeDeployments(
   address: string | undefined,
@@ -106,11 +139,11 @@ export function useSafeDeployments(
   data: SafeDeployments | undefined;
   isLoading: boolean;
 } {
-  const normalized = address?.toLowerCase();
+  const cacheKey = address?.toLowerCase();
   const query = useQuery({
-    queryKey: ['safe-deployments', normalized],
-    queryFn: () => probeAllChains(normalized as string),
-    enabled: typeof normalized === 'string' && normalized.length > 0,
+    queryKey: ['safe-deployments', cacheKey],
+    queryFn: () => probeAllChains(address as string),
+    enabled: typeof address === 'string' && address.length > 0,
     // Safe deployments are stable for the lifetime of an address. A user
     // could deploy a Safe on a new chain mid-session in theory; fine to
     // miss that until reload.
