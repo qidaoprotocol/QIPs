@@ -3,6 +3,7 @@ import { useAccount, useChainId, useSignMessage } from 'wagmi';
 import { SiweMessage } from 'siwe';
 import { getMaiAPIClient } from '../services/maiApiClient';
 import { config } from '../config/env';
+import { pickSiweChainId, useSafeDeployments } from './useSafeDeployments';
 
 export type SiweSessionStatus = 'idle' | 'signing' | 'authenticated';
 
@@ -79,13 +80,25 @@ function subscribeSessionState(listener: () => void): () => void {
 
 export function useSiweSession(): UseSiweSessionResult {
   const { address: walletAddress, isConnected } = useAccount();
-  // EIP-4361 requires a chainId in the SIWE message; for EOAs it is
-  // informational, but for smart-account signers (Safe and other EIP-1271
+  // EIP-4361 requires a chainId in the SIWE message. For EOAs it is
+  // informational; for smart-account signers (Safe and other EIP-1271
   // wallets) it tells the verifier which chain's RPC to query for
-  // `isValidSignature`. Reading the wallet's actual chain — not a
-  // hardcoded constant — is what lets a Safe on Polygon sign here.
+  // `isValidSignature`. The wallet's reported chain is the right answer
+  // when the wallet is actually on its Safe's home chain, but Safes are
+  // often connected through wrappers (Rabby's Safe import, ConnectKit's
+  // initialChainId on Base) where the wallet may report a chain that
+  // doesn't match where the Safe is deployed. So we additionally probe
+  // the Safe Transaction Service to find the deployment chain(s) and let
+  // pickSiweChainId resolve the right answer.
   const walletChainId = useChainId();
   const { signMessageAsync } = useSignMessage();
+
+  // Kick off the deployment probe as soon as a wallet is connected — by
+  // the time the user clicks the sign-in button, the result is usually
+  // already cached. If the probe is still inflight or returned only
+  // unknowns, pickSiweChainId falls back to walletChainId so a flaky
+  // Safe TX Service never blocks sign-in.
+  const { data: safeDeployments } = useSafeDeployments(walletAddress);
 
   const state = useSyncExternalStore(
     subscribeSessionState,
@@ -129,13 +142,14 @@ export function useSiweSession(): UseSiweSessionResult {
       // 2. Build the SIWE message.
       const issuedAt = new Date();
       const expirationTime = new Date(issuedAt.getTime() + NONCE_TTL_SECONDS * 1000);
+      const siweChainId = pickSiweChainId(walletChainId, safeDeployments);
       const message = new SiweMessage({
         domain: window.location.host,
         address: walletAddress,
         statement: STATEMENT,
         uri: window.location.origin,
         version: '1',
-        chainId: walletChainId,
+        chainId: siweChainId,
         nonce: nonceResp.nonce,
         issuedAt: issuedAt.toISOString(),
         expirationTime: expirationTime.toISOString(),
@@ -184,7 +198,7 @@ export function useSiweSession(): UseSiweSessionResult {
       setSessionState({ ...sessionState, status: 'idle' });
       return { ok: false, reason: 'unknown' };
     }
-  }, [isConnected, walletAddress, walletChainId, signMessageAsync]);
+  }, [isConnected, walletAddress, walletChainId, safeDeployments, signMessageAsync]);
 
   const signOut = useCallback(() => {
     setSessionState({ status: 'idle', sessionToken: undefined, address: undefined });
