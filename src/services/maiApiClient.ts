@@ -5,6 +5,17 @@
  */
 
 import { QCIStatus } from './qciClient';
+import type {
+  CommentListResponse,
+  ListCommentsOptions,
+  ModerationRequest,
+  ModerationResponse,
+  NonceResponse,
+  PostCommentRequest,
+  PostCommentResponse,
+  VerifyRequest,
+  VerifyResponse,
+} from '../types/comments';
 
 /**
  * QCI data as returned by the Mai API
@@ -183,6 +194,217 @@ export class MaiAPIClient {
     };
 
     return statusMap[status] || `Status ${status}`;
+  }
+
+  /* ─────────────────────────────────────────────────────────
+     QIP comments — auth (SIWE)
+     ───────────────────────────────────────────────────────── */
+
+  /**
+   * Request a single-use SIWE nonce bound to the given address.
+   *
+   * Caller signs the SIWE message containing this nonce, then submits the
+   * message + signature to verifyQipCommentSignature(). The plaintext nonce
+   * is returned once; only the HMAC hash is persisted server-side.
+   */
+  async requestQipCommentNonce(address: string): Promise<NonceResponse> {
+    return this.commentsJsonRequest<NonceResponse>(
+      'POST',
+      '/v2/auth/qip-comments/nonce',
+      { address },
+    );
+  }
+
+  /**
+   * Verify a SIWE signature and exchange it for a session.
+   *
+   * On success returns a bearer token (kept in memory only — never persist
+   * to localStorage) and the API also sets a same-origin HttpOnly session
+   * cookie. Subsequent comment writes can use either authentication path.
+   */
+  async verifyQipCommentSignature(req: VerifyRequest): Promise<VerifyResponse> {
+    return this.commentsJsonRequest<VerifyResponse>(
+      'POST',
+      '/v2/auth/qip-comments/verify',
+      req,
+    );
+  }
+
+  /* ─────────────────────────────────────────────────────────
+     QIP comments — public reads + gated writes
+     ───────────────────────────────────────────────────────── */
+
+  /**
+   * List visible (non-hidden) comments for a QCI, newest-first.
+   *
+   * No auth required for reading. Use the `before` cursor (returned as
+   * `nextBefore` in each page) for infinite-scroll pagination. Hidden
+   * comments are filtered server-side and never appear in the response.
+   */
+  async listQipComments(opts: ListCommentsOptions): Promise<CommentListResponse> {
+    const params = new URLSearchParams();
+    params.append('qciId', String(opts.qciId));
+    if (opts.limit !== undefined) params.append('limit', String(opts.limit));
+    if (opts.before !== undefined) params.append('before', String(opts.before));
+
+    const url = `${this.baseUrl}/v2/comments?${params.toString()}`;
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (opts.sessionToken) {
+      headers.Authorization = `Bearer ${opts.sessionToken}`;
+    }
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers,
+      credentials: opts.sessionToken ? 'omit' : 'include',
+      signal: AbortSignal.timeout(this.defaultTimeout),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Mai API request failed: ${response.status} ${response.statusText}`);
+    }
+    return (await response.json()) as CommentListResponse;
+  }
+
+  /**
+   * Post a comment on a QCI.
+   *
+   * Returns a discriminated union — callers should branch on `result.ok`
+   * and `result.status`. The 403 case carries the API's actual `threshold`
+   * and `currentVp` so the toast can render the values the server saw,
+   * not anything the client computed locally.
+   */
+  async postQipComment(req: PostCommentRequest): Promise<PostCommentResponse> {
+    return this.commentsResultRequest<PostCommentResponse>(
+      'POST',
+      '/v2/comments',
+      { qciId: req.qciId, body: req.body },
+      req.sessionToken,
+      (status, comment) => ({ ok: true, status, comment }) as never,
+    ) as Promise<PostCommentResponse>;
+  }
+
+  /** Editor-only: hide a comment. Idempotent — 409 if already hidden. */
+  async hideQipComment(req: ModerationRequest): Promise<ModerationResponse> {
+    return this.commentsResultRequest<ModerationResponse>(
+      'POST',
+      `/v2/comments/${req.commentId}/hide`,
+      req.reason !== undefined ? { reason: req.reason } : {},
+      req.sessionToken,
+      (_status, payload) => ({
+        ok: true,
+        commentId: (payload as { commentId: number }).commentId,
+        actionId: (payload as { actionId: number }).actionId,
+      }),
+    ) as Promise<ModerationResponse>;
+  }
+
+  /** Editor-only: unhide a previously hidden comment. */
+  async unhideQipComment(req: ModerationRequest): Promise<ModerationResponse> {
+    return this.commentsResultRequest<ModerationResponse>(
+      'POST',
+      `/v2/comments/${req.commentId}/unhide`,
+      req.reason !== undefined ? { reason: req.reason } : {},
+      req.sessionToken,
+      (_status, payload) => ({
+        ok: true,
+        commentId: (payload as { commentId: number }).commentId,
+        actionId: (payload as { actionId: number }).actionId,
+      }),
+    ) as Promise<ModerationResponse>;
+  }
+
+  /* ─────────────────────────────────────────────────────────
+     Shared transport helpers for the comment endpoints
+     ───────────────────────────────────────────────────────── */
+
+  /**
+   * Fire a JSON request and throw on any non-2xx — used for the auth
+   * endpoints where every failure is fatal to the flow.
+   */
+  private async commentsJsonRequest<T>(
+    method: string,
+    path: string,
+    body: unknown,
+  ): Promise<T> {
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(this.defaultTimeout),
+    });
+
+    if (!response.ok) {
+      let detail = '';
+      try {
+        const errBody = (await response.json()) as { error?: string; message?: string };
+        detail = errBody.error || errBody.message || '';
+      } catch {
+        // Non-JSON error body; fall through to status text.
+      }
+      throw new Error(
+        `Mai API ${path} failed: ${response.status} ${response.statusText}${
+          detail ? ` (${detail})` : ''
+        }`,
+      );
+    }
+    return (await response.json()) as T;
+  }
+
+  /**
+   * Fire a JSON request and return a discriminated `{ ok, ... }` result for
+   * routes whose error states the caller wants to pattern-match (POST
+   * comment, moderation actions). Auth failures and rate limits are NOT
+   * thrown — they're returned as structured errors.
+   */
+  private async commentsResultRequest<TResult>(
+    method: string,
+    path: string,
+    body: unknown,
+    sessionToken: string | undefined,
+    onSuccess: (status: number, payload: unknown) => unknown,
+  ): Promise<TResult> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    };
+    if (sessionToken) {
+      headers.Authorization = `Bearer ${sessionToken}`;
+    }
+
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method,
+      headers,
+      // Bearer wins when present — don't also send the cookie. Cookie
+      // travels only when no token is supplied (same-origin path).
+      credentials: sessionToken ? 'omit' : 'include',
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(this.defaultTimeout),
+    });
+
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = {};
+    }
+
+    if (response.ok) {
+      return onSuccess(response.status, payload) as TResult;
+    }
+
+    // Coerce the server's structured error into the discriminated shape.
+    const err = payload as Record<string, unknown>;
+    const base = {
+      ok: false as const,
+      status: response.status as 401 | 403 | 404 | 409 | 413 | 429 | 503 | 400 | 500,
+      error: typeof err.error === 'string' ? err.error : 'unknown',
+    };
+    return { ...base, ...err } as TResult;
   }
 
   /**
