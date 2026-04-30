@@ -10,3 +10,7 @@ export { useQITokenBalance } from './useQITokenBalance';
 // QIP comments
 export { useSiweSession } from './useSiweSession';
 export type { SiweSessionStatus, SiweSignInError, UseSiweSessionResult } from './useSiweSession';
+export { useComments } from './useComments';
+export type { UseCommentsResult } from './useComments';
+export { useIsEditor } from './useIsEditor';
+export type { UseIsEditorResult } from './useIsEditor';
