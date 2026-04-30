@@ -69,6 +69,18 @@ export const queryKeys = {
   // Status queries
   allStatuses: (registryAddress: string | undefined) =>
     ['statuses', registryAddress] as const,
+
+  // QIP comments — infinite list of visible comments per QCI
+  qipComments: (qciId: number) =>
+    ['qip-comments', qciId] as const,
+
+  // EDITOR_ROLE bytes32 hash on a specific registry (one shot, infinite TTL)
+  qipCommentsEditorRoleHash: (registryAddress: string | undefined) =>
+    ['qip-comments', 'editor-role-hash', registryAddress] as const,
+
+  // hasRole(EDITOR_ROLE, address) on a specific registry
+  qipCommentsIsEditor: (registryAddress: string | undefined, address: string | undefined) =>
+    ['qip-comments', 'is-editor', registryAddress, address?.toLowerCase()] as const,
 } as const;
 
 /**
@@ -91,4 +103,7 @@ export const queryKeyPatterns = {
   
   // Invalidate all pages
   allPages: ['qcis-page'] as const,
+
+  // Invalidate every QIP-comments query (list pages, editor role, etc.)
+  allQipComments: ['qip-comments'] as const,
 } as const;
