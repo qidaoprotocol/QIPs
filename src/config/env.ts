@@ -58,6 +58,11 @@ export const config = {
   // Mai API Configuration for QCI fetching
   maiApiUrl: getEnvVar("VITE_MAI_API_URL", "https://api.mai.finance"),
 
+  // QIP comments body byte cap; must agree with the API's
+  // QIP_COMMENTS_BODY_MAX_BYTES so the client-side counter and the server-side
+  // cap reject the same inputs. Default 8192 (8 KB).
+  qipCommentsBodyMaxBytes: parseInt(getEnvVar("VITE_QIP_COMMENTS_BODY_MAX_BYTES", "8192"), 10) || 8192,
+
   // App Configuration
   localMode: getBoolEnvVar("VITE_LOCAL_MODE", false),
   useTestnet: getBoolEnvVar("VITE_USE_TESTNET", false),
