@@ -5,3 +5,7 @@ export { useQCIList } from './useQCIList';
 export { useCreateQCI } from './useCreateQCI';
 export { useUpdateQCI } from './useUpdateQCI';
 export { useQCIVersionHistory } from './useQCIVersionHistory';
+
+// QIP comments
+export { useSiweSession } from './useSiweSession';
+export type { SiweSessionStatus, SiweSignInError, UseSiweSessionResult } from './useSiweSession';
