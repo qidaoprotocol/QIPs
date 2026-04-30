@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { useAccount, useSignMessage } from 'wagmi';
 import { SiweMessage } from 'siwe';
 import { getMaiAPIClient } from '../services/maiApiClient';
@@ -47,34 +47,71 @@ const NONCE_TTL_SECONDS = 10 * 60;
  */
 const SIWE_CHAIN_ID = 1;
 
+/* ─────────────────────────────────────────────────────────
+   Shared session state (module-scoped singleton)
+   ─────────────────────────────────────────────────────────
+   Every consumer of useSiweSession needs to see the same token and status,
+   not its own local copy. Without a shared store, signing in inside one
+   component's tree leaves siblings unaware that a session exists, so the
+   composer never replaces the login button.
+ */
+
+interface SessionState {
+  status: SiweSessionStatus;
+  sessionToken: string | undefined;
+  address: string | undefined;
+}
+
+let sessionState: SessionState = {
+  status: 'idle',
+  sessionToken: undefined,
+  address: undefined,
+};
+
+const subscribers = new Set<() => void>();
+
+function getSessionSnapshot(): SessionState {
+  return sessionState;
+}
+
+function setSessionState(next: SessionState): void {
+  sessionState = next;
+  for (const listener of subscribers) listener();
+}
+
+function subscribeSessionState(listener: () => void): () => void {
+  subscribers.add(listener);
+  return () => subscribers.delete(listener);
+}
+
 export function useSiweSession(): UseSiweSessionResult {
   const { address: walletAddress, isConnected } = useAccount();
   const { signMessageAsync } = useSignMessage();
 
-  const [status, setStatus] = useState<SiweSessionStatus>('idle');
-  const [sessionToken, setSessionToken] = useState<string | undefined>(undefined);
-  const [authedAddress, setAuthedAddress] = useState<string | undefined>(undefined);
+  const state = useSyncExternalStore(
+    subscribeSessionState,
+    getSessionSnapshot,
+    getSessionSnapshot,
+  );
 
   // If the user disconnects their wallet (or switches accounts), drop the
   // local session — it's no longer attributable to whoever's currently
   // controlling the page.
   useEffect(() => {
     if (!isConnected) {
-      setStatus('idle');
-      setSessionToken(undefined);
-      setAuthedAddress(undefined);
+      if (sessionState.sessionToken !== undefined || sessionState.status !== 'idle') {
+        setSessionState({ status: 'idle', sessionToken: undefined, address: undefined });
+      }
       return;
     }
     if (
-      authedAddress &&
+      sessionState.address &&
       walletAddress &&
-      authedAddress.toLowerCase() !== walletAddress.toLowerCase()
+      sessionState.address.toLowerCase() !== walletAddress.toLowerCase()
     ) {
-      setStatus('idle');
-      setSessionToken(undefined);
-      setAuthedAddress(undefined);
+      setSessionState({ status: 'idle', sessionToken: undefined, address: undefined });
     }
-  }, [isConnected, walletAddress, authedAddress]);
+  }, [isConnected, walletAddress]);
 
   const signIn = useCallback(async (): Promise<
     { ok: true } | { ok: false; reason: SiweSignInError }
@@ -83,7 +120,7 @@ export function useSiweSession(): UseSiweSessionResult {
       return { ok: false, reason: 'no_wallet' };
     }
 
-    setStatus('signing');
+    setSessionState({ ...sessionState, status: 'signing' });
     try {
       const client = getMaiAPIClient(config.maiApiUrl);
 
@@ -111,8 +148,7 @@ export function useSiweSession(): UseSiweSessionResult {
       try {
         signature = await signMessageAsync({ message: messageBody });
       } catch (err) {
-        setStatus('idle');
-        // Wagmi surfaces a UserRejectedRequestError when the user cancels.
+        setSessionState({ ...sessionState, status: 'idle' });
         if (
           err instanceof Error &&
           /reject|denied|cancel/i.test(err.message)
@@ -123,42 +159,50 @@ export function useSiweSession(): UseSiweSessionResult {
       }
 
       // 4. Verify with the API and capture the bearer token.
-      const verifyResp = await client.verifyQipCommentSignature({
-        message: messageBody,
-        signature,
-      });
+      let verifyResp;
+      try {
+        verifyResp = await client.verifyQipCommentSignature({
+          message: messageBody,
+          signature,
+        });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[useSiweSession] verify failed:', err);
+        setSessionState({ ...sessionState, status: 'idle' });
+        return { ok: false, reason: 'verify_failed' };
+      }
 
       const lowercased = verifyResp.address.toLowerCase();
-      setAuthedAddress(lowercased);
-      setSessionToken(verifyResp.token);
-      setStatus('authenticated');
+      setSessionState({
+        status: 'authenticated',
+        sessionToken: verifyResp.token,
+        address: lowercased,
+      });
       return { ok: true };
-    } catch {
-      setStatus('idle');
-      return { ok: false, reason: 'verify_failed' };
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[useSiweSession] sign-in failed before verify:', err);
+      setSessionState({ ...sessionState, status: 'idle' });
+      return { ok: false, reason: 'unknown' };
     }
   }, [isConnected, walletAddress, signMessageAsync]);
 
   const signOut = useCallback(() => {
-    setStatus('idle');
-    setSessionToken(undefined);
-    setAuthedAddress(undefined);
+    setSessionState({ status: 'idle', sessionToken: undefined, address: undefined });
   }, []);
 
   const clearOn401 = useCallback(() => {
     // Same effect as signOut, but the name flags the intent at the call
     // site so it's clear we're reacting to a server-side session expiry,
     // not a user action.
-    setStatus('idle');
-    setSessionToken(undefined);
-    setAuthedAddress(undefined);
+    setSessionState({ status: 'idle', sessionToken: undefined, address: undefined });
   }, []);
 
   return {
-    status,
-    address: authedAddress,
-    sessionToken,
-    isPending: status === 'signing',
+    status: state.status,
+    address: state.address,
+    sessionToken: state.sessionToken,
+    isPending: state.status === 'signing',
     signIn,
     signOut,
     clearOn401,
