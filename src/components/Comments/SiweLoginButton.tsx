@@ -1,9 +1,23 @@
 import React from 'react';
 import { ConnectKitButton } from 'connectkit';
-import { useAccount } from 'wagmi';
+import { useAccount, useChainId } from 'wagmi';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { useSiweSession } from '@/hooks/useSiweSession';
+import { useSafeDeployments, pickSiweChainId } from '@/hooks/useSafeDeployments';
+
+// Minimal chain-id → human label map for the wrong-chain toast.
+// Mirrors the chains the Safe-deployment probe checks (mainnet, polygon,
+// base, linea); add entries here if useSafeDeployments grows its allowlist.
+const CHAIN_LABELS: Record<number, string> = {
+  1: 'Ethereum',
+  137: 'Polygon',
+  8453: 'Base',
+  59144: 'Linea',
+};
+
+const chainLabel = (chainId: number): string =>
+  CHAIN_LABELS[chainId] ?? `chain ${chainId}`;
 
 /**
  * The auth gate above the comment composer:
@@ -20,7 +34,9 @@ import { useSiweSession } from '@/hooks/useSiweSession';
  *   unknown       → toast (transport error, etc.)
  */
 export const SiweLoginButton: React.FC = () => {
-  const { isConnected } = useAccount();
+  const { address, isConnected } = useAccount();
+  const walletChainId = useChainId();
+  const { data: safeDeployments } = useSafeDeployments(address);
   const { sessionToken, signIn, isPending } = useSiweSession();
 
   if (sessionToken) {
@@ -35,13 +51,21 @@ export const SiweLoginButton: React.FC = () => {
     <Button
       onClick={async () => {
         const result = await signIn();
-        if (!result.ok && result.reason !== 'user_rejected') {
+        if (result.ok || result.reason === 'user_rejected') return;
+
+        if (result.reason === 'wrong_chain') {
+          const targetChainId = pickSiweChainId(walletChainId, safeDeployments);
           toast.error(
-            result.reason === 'verify_failed'
-              ? "Couldn't verify your signature. Please try again."
-              : "Couldn't sign in. Please try again.",
+            `Switch your wallet to ${chainLabel(targetChainId)} to sign in — your Safe is deployed there.`,
           );
+          return;
         }
+
+        toast.error(
+          result.reason === 'verify_failed'
+            ? "Couldn't verify your signature. Please try again."
+            : "Couldn't sign in. Please try again.",
+        );
       }}
       disabled={isPending}
     >
