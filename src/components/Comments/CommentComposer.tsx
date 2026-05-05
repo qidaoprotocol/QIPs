@@ -63,7 +63,7 @@ export const CommentComposer: React.FC<CommentComposerProps> = ({ qciId }) => {
         break;
       case 403:
         toast.error(
-          `You need ${formatNumber(result.threshold)} qipowah to comment. ` +
+          `You need ${formatNumber(result.threshold)} aveQi to comment. ` +
             `You have ${formatNumber(result.currentVp)}.`,
         );
         break;
