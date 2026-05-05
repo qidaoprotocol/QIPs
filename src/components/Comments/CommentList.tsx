@@ -64,7 +64,7 @@ export const CommentList: React.FC<CommentListProps> = ({ qciId }) => {
   if (comments.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        No comments yet. Voters with sufficient qipowah can post.
+        No comments yet. Voters with sufficient aveQi can post.
       </p>
     );
   }

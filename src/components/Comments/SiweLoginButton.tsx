@@ -1,5 +1,4 @@
 import React from 'react';
-import { ConnectKitButton } from 'connectkit';
 import { useAccount, useChainId } from 'wagmi';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -22,9 +21,10 @@ const chainLabel = (chainId: number): string =>
 /**
  * The auth gate above the comment composer:
  *
- *   no wallet           → ConnectKitButton (defers to the existing flow
- *                          configured in Web3Provider — keeps wallet UX
- *                          consistent across the app).
+ *   no wallet           → small hint pointing the user at the header connect
+ *                          button (no second wallet button — the header
+ *                          already owns connect UX, and rendering another
+ *                          one inline is visually redundant).
  *   wallet, no session  → "Sign in to comment" button → useSiweSession.signIn()
  *   wallet + session    → renders nothing (composer takes over).
  *
@@ -44,7 +44,11 @@ export const SiweLoginButton: React.FC = () => {
   }
 
   if (!isConnected) {
-    return <ConnectKitButton />;
+    return (
+      <p className="text-sm text-muted-foreground">
+        Connect your wallet from the top right to comment.
+      </p>
+    );
   }
 
   return (
