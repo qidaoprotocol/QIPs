@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
-import { useAccount, useChainId, useSignMessage } from 'wagmi';
+import { useAccount, useChainId, useSignMessage, useSwitchChain } from 'wagmi';
 import { SiweMessage } from 'siwe';
 import { getMaiAPIClient } from '../services/maiApiClient';
 import { config } from '../config/env';
@@ -15,6 +15,7 @@ export type SiweSessionStatus = 'idle' | 'signing' | 'authenticated';
 export type SiweSignInError =
   | 'no_wallet'
   | 'user_rejected'
+  | 'wrong_chain'
   | 'verify_failed'
   | 'unknown';
 
@@ -92,6 +93,7 @@ export function useSiweSession(): UseSiweSessionResult {
   // pickSiweChainId resolve the right answer.
   const walletChainId = useChainId();
   const { signMessageAsync } = useSignMessage();
+  const { switchChainAsync } = useSwitchChain();
 
   // Kick off the deployment probe as soon as a wallet is connected — by
   // the time the user clicks the sign-in button, the result is usually
@@ -143,6 +145,25 @@ export function useSiweSession(): UseSiweSessionResult {
       const issuedAt = new Date();
       const expirationTime = new Date(issuedAt.getTime() + NONCE_TTL_SECONDS * 1000);
       const siweChainId = pickSiweChainId(walletChainId, safeDeployments);
+
+      // 2a. If the wallet is on a different chain than where the Safe lives,
+      // switch first. EIP-1271 verification reads `isValidSignature` from
+      // the chain in the SIWE message, but the wallet (e.g. Rabby's
+      // Safe-import flow) only proposes signatures via the Safe Transaction
+      // Service for its currently-selected chain. Without this switch,
+      // signing either silently fails or the wallet signs against the
+      // wrong chain and verify rejects.
+      if (walletChainId !== siweChainId) {
+        try {
+          await switchChainAsync({ chainId: siweChainId });
+        } catch (err) {
+          setSessionState({ ...sessionState, status: 'idle' });
+          // User rejected the network switch, or the wallet doesn't
+          // support programmatic switches.
+          return { ok: false, reason: 'wrong_chain' };
+        }
+      }
+
       const message = new SiweMessage({
         domain: window.location.host,
         address: walletAddress,
@@ -198,7 +219,7 @@ export function useSiweSession(): UseSiweSessionResult {
       setSessionState({ ...sessionState, status: 'idle' });
       return { ok: false, reason: 'unknown' };
     }
-  }, [isConnected, walletAddress, walletChainId, safeDeployments, signMessageAsync]);
+  }, [isConnected, walletAddress, walletChainId, safeDeployments, signMessageAsync, switchChainAsync]);
 
   const signOut = useCallback(() => {
     setSessionState({ status: 'idle', sessionToken: undefined, address: undefined });
