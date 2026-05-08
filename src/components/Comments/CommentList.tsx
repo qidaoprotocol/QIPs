@@ -3,10 +3,29 @@ import { formatDistanceToNow } from 'date-fns';
 import { useComments } from '@/hooks/useComments';
 import { useIsEditor } from '@/hooks/useIsEditor';
 import { useSiweSession } from '@/hooks/useSiweSession';
+import { MaiApiError } from '@/services/maiApiClient';
 import type { Comment } from '@/types/comments';
 import { Skeleton } from './CommentSkeleton';
 import { SafeMarkdown } from './SafeMarkdown';
 import { ModerationMenu } from './ModerationMenu';
+
+/**
+ * Distinguish "the comments service is down or unreachable" from "the
+ * request failed for an application-level reason (e.g., invalid QCI id)"
+ * so the UI can offer the right next step. 5xx + network/timeout map to
+ * a soft-recoverable retry message; anything else preserves the existing
+ * generic copy.
+ */
+function isTransientCommentsError(error: Error | null): boolean {
+  if (!error) return false;
+  if (error instanceof MaiApiError) return error.status >= 500;
+  // Native fetch + AbortSignal.timeout failure modes — DOMException
+  // ("TimeoutError" / "AbortError") and TypeError (network unreachable,
+  // CORS preflight failure that surfaces as "fetch failed", etc.).
+  if (error.name === 'TimeoutError' || error.name === 'AbortError') return true;
+  if (error.name === 'TypeError') return true;
+  return /timeout|fetch failed|network/i.test(error.message ?? '');
+}
 
 interface CommentListProps {
   qciId: number;
@@ -21,7 +40,7 @@ function shortenAddress(addr: string): string {
 }
 
 export const CommentList: React.FC<CommentListProps> = ({ qciId }) => {
-  const { comments, isLoading, isError, hasMore, isFetchingMore, fetchMore } = useComments(qciId);
+  const { comments, isLoading, isError, error, hasMore, isFetchingMore, fetchMore } = useComments(qciId);
   const { isEditor } = useIsEditor();
   const { sessionToken } = useSiweSession();
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -54,6 +73,13 @@ export const CommentList: React.FC<CommentListProps> = ({ qciId }) => {
   }
 
   if (isError) {
+    if (isTransientCommentsError(error)) {
+      return (
+        <p className="text-sm text-muted-foreground">
+          Comments are temporarily unavailable. Refresh to retry.
+        </p>
+      );
+    }
     return (
       <p className="text-sm text-destructive">
         Couldn't load comments. Try refreshing the page.

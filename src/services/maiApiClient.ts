@@ -18,6 +18,25 @@ import type {
 } from '../types/comments';
 
 /**
+ * Thrown by Mai API client methods when the upstream returns a non-2xx
+ * status. Carries the numeric `status` so consumers can branch on
+ * 5xx-vs-4xx without parsing the error message text. Future renames of the
+ * formatted message must not break the comments-error UX in
+ * CommentList.tsx — branch on `instanceof MaiApiError` and `status`.
+ */
+export class MaiApiError extends Error {
+  readonly status: number;
+  readonly statusText: string;
+
+  constructor(status: number, statusText: string) {
+    super(`Mai API request failed: ${status} ${statusText}`);
+    this.name = 'MaiApiError';
+    this.status = status;
+    this.statusText = statusText;
+  }
+}
+
+/**
  * QCI data as returned by the Mai API
  * Matches the format from /v3/qcis endpoint
  */
@@ -267,7 +286,7 @@ export class MaiAPIClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Mai API request failed: ${response.status} ${response.statusText}`);
+      throw new MaiApiError(response.status, response.statusText);
     }
     return (await response.json()) as CommentListResponse;
   }
