@@ -5,8 +5,10 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
 import { AlertCircle, CheckCircle2, Edit3, Loader2 } from "lucide-react";
+import { base } from "wagmi/chains";
 import { useUpdateSnapshotProposal } from "../hooks/useUpdateSnapshotProposal";
 import { toast } from "sonner";
+import { ChainSwitchRejectedError, useEnsureChain } from "../hooks/useEnsureChain";
 
 interface SnapshotModeratorProps {
   qciNumber: number;
@@ -27,6 +29,7 @@ const SnapshotModerator: React.FC<SnapshotModeratorProps> = ({
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  const { ensureChain, isOnChain, switching } = useEnsureChain(base.id);
   const updateSnapshotMutation = useUpdateSnapshotProposal({
     registryAddress,
   });
@@ -51,6 +54,11 @@ const SnapshotModerator: React.FC<SnapshotModeratorProps> = ({
     setError(null);
 
     try {
+      // Make sure the wallet is on Base before estimating, simulating, or
+      // writing. Prevents the documented polygon-rpc.com 401 path that
+      // happens when the wallet is left on another chain after a SIWE sign.
+      await ensureChain();
+
       // Use the mutation hook to update the snapshot proposal
       await updateSnapshotMutation.mutateAsync({
         qciNumber: BigInt(qciNumber),
@@ -72,6 +80,12 @@ const SnapshotModerator: React.FC<SnapshotModeratorProps> = ({
         onSuccess();
       }
     } catch (error: any) {
+      // Quiet path for chain-switch rejection: inline message only, no toast.
+      if (error instanceof ChainSwitchRejectedError) {
+        setError("Switch to Base to continue");
+        return;
+      }
+
       console.error("Failed to update Snapshot proposal:", error);
 
       let errorMessage = "Failed to update Snapshot proposal";
@@ -101,9 +115,10 @@ const SnapshotModerator: React.FC<SnapshotModeratorProps> = ({
         variant="outline"
         size="sm"
         className="gap-2"
+        disabled={switching}
       >
         <Edit3 className="h-3 w-3" />
-        Update Snapshot Link
+        {isOnChain ? "Update Snapshot Link" : "Switch to Base to update"}
       </Button>
     );
   }
