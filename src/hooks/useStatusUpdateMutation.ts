@@ -1,16 +1,22 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useWriteContract, useWaitForTransactionReceipt, usePublicClient } from 'wagmi';
+import { useWriteContract, usePublicClient } from 'wagmi';
+import { base } from 'wagmi/chains';
 import { QCIStatus } from '../services/qciClient';
 import { STATUS_ENUM_TO_NAME } from '../config/statusConfig';
 import { toast } from 'react-hot-toast';
 import type { Hash } from 'viem';
 import { config } from '../config/env';
 import { QCIRegistryABI } from '../config/abis/QCIRegistry';
+import { ChainSwitchRejectedError, useEnsureChain } from './useEnsureChain';
 
 interface StatusUpdateParams {
   qciNumber: bigint;
   newStatus: QCIStatus | string;
   registryAddress: `0x${string}`;
+  /**
+   * Retained for caller-API compatibility. Reads now go through the wagmi
+   * Base transport rather than a per-call RPC URL, so this is unused.
+   */
   rpcUrl?: string;
 }
 
@@ -21,10 +27,16 @@ interface StatusUpdateParams {
 export function useStatusUpdateMutation() {
   const { writeContractAsync } = useWriteContract();
   const queryClient = useQueryClient();
-  const publicClient = usePublicClient();
+  // Pin reads (incl. waitForTransactionReceipt) to Base via the wagmi
+  // transport registered in Web3Provider, regardless of the wallet's chain.
+  const basePublicClient = usePublicClient({ chainId: base.id });
+  const { ensureChain } = useEnsureChain(base.id);
 
   return useMutation<Hash, Error, StatusUpdateParams>({
     retry: (failureCount, error) => {
+      if (error instanceof ChainSwitchRejectedError) {
+        return false;
+      }
       if (error?.message?.includes("user rejected") ||
           error?.message?.includes("User denied") ||
           error?.message?.includes("User cancelled") ||
@@ -42,6 +54,12 @@ export function useStatusUpdateMutation() {
         statusString = STATUS_ENUM_TO_NAME[newStatus as QCIStatus] ?? "Draft";
       }
 
+      // Make sure the wallet is on Base before any contract reads or the
+      // write. Without this, viem routes eth_estimateGas through the
+      // wallet's current-chain RPC (e.g., polygon-rpc.com after a SIWE
+      // sign on a Polygon Safe).
+      await ensureChain();
+
       const hash = await writeContractAsync({
         address: registryAddress,
         abi: QCIRegistryABI,
@@ -49,9 +67,10 @@ export function useStatusUpdateMutation() {
         args: [qciNumber, statusString],
       });
 
-      // Wait for transaction confirmation
-      if (publicClient) {
-        await publicClient.waitForTransactionReceipt({
+      // Wait for transaction confirmation on Base, not on whatever chain
+      // the wallet currently reports.
+      if (basePublicClient) {
+        await basePublicClient.waitForTransactionReceipt({
           hash,
           confirmations: 1,
         });
@@ -131,7 +150,9 @@ export function useStatusUpdateMutation() {
       }
 
       let errorMessage = "Failed to update status";
-      if (err.message?.includes("AccessControl")) {
+      if (err instanceof ChainSwitchRejectedError) {
+        errorMessage = "Switch to Base to update the status";
+      } else if (err.message?.includes("AccessControl")) {
         errorMessage = "You do not have permission to update this status";
       } else if (err.message?.includes("user rejected")) {
         errorMessage = "Transaction cancelled";
