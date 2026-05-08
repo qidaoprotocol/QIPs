@@ -342,32 +342,34 @@ const QCIDetail: React.FC = () => {
         {qciData.proposal && qciData.proposal !== "None" && qciData.proposal !== "TBU" && (
           <div className="mb-6">
             <SnapshotStatus proposalIdOrUrl={qciData.proposal} showVotes={true} className="bg-muted/50 p-4 rounded-lg border" />
-            {/* Show moderation UI for editors when proposal is already linked */}
-            {isEditor && qciData.status === "Posted to Snapshot" && (
-              <div className="mt-4">
-                <SnapshotModerator
-                  qciNumber={qciData.qciNumber}
-                  currentProposalId={qciData.proposal}
-                  registryAddress={registryAddress}
-                  onSuccess={async () => {
-                    // Refresh QCI data after successful update
-                    await new Promise((resolve) => setTimeout(resolve, 1000));
-                    queryClient.removeQueries({
-                      queryKey: ["qci", parseInt(qciNumberParsed)],
-                      exact: false,
-                    });
-                    queryClient.removeQueries({
-                      queryKey: ["qci-blockchain", parseInt(qciNumberParsed)],
-                      exact: false,
-                    });
-                    queryClient.invalidateQueries({
-                      queryKey: ["qcis", "list", registryAddress],
-                    });
-                    await refetch();
-                  }}
-                />
-              </div>
-            )}
+          </div>
+        )}
+
+        {/* Editor moderation UI: shown whenever status is "Posted to Snapshot",
+            including the recovery case where the on-chain proposal ID is missing
+            (status was advanced via updateStatus instead of linkSnapshotProposal). */}
+        {isEditor && qciData.status === "Posted to Snapshot" && (
+          <div className="mb-6">
+            <SnapshotModerator
+              qciNumber={qciData.qciNumber}
+              currentProposalId={qciData.proposal}
+              registryAddress={registryAddress}
+              onSuccess={async () => {
+                await new Promise((resolve) => setTimeout(resolve, 1000));
+                queryClient.removeQueries({
+                  queryKey: ["qci", parseInt(qciNumberParsed)],
+                  exact: false,
+                });
+                queryClient.removeQueries({
+                  queryKey: ["qci-blockchain", parseInt(qciNumberParsed)],
+                  exact: false,
+                });
+                queryClient.invalidateQueries({
+                  queryKey: ["qcis", "list", registryAddress],
+                });
+                await refetch();
+              }}
+            />
           </div>
         )}
 
