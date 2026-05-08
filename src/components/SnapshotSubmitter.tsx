@@ -9,9 +9,11 @@ import { Card, CardContent, CardFooter } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { AlertCircle, CheckCircle2, ExternalLink, Loader2 } from "lucide-react";
+import { base } from "wagmi/chains";
 import { useLinkSnapshotProposal } from "../hooks/useLinkSnapshotProposal";
 import { getLatestQipNumber } from "../utils/snapshotClient";
 import { useQITokenBalance } from "../hooks/useQITokenBalance";
+import { ChainSwitchRejectedError, useEnsureChain } from "../hooks/useEnsureChain";
 
 interface SnapshotSubmitterProps {
   frontmatter: any;
@@ -35,6 +37,7 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
   isEditor = false,
 }) => {
   const signer = useEthersSigner();
+  const { ensureChain } = useEnsureChain(base.id);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<React.ReactNode>(null);
   const [showStatusUpdatePrompt, setShowStatusUpdatePrompt] = useState(false);
@@ -332,6 +335,26 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
 
     setIsUpdatingStatus(true);
     try {
+      // Make sure the wallet is on Base before estimating, simulating, or
+      // writing. Mirrors the SIWE chain-switch pattern; prevents viem from
+      // routing eth_estimateGas through the wallet's current-chain RPC
+      // (e.g., polygon-rpc.com after a SIWE sign on a Polygon Safe).
+      try {
+        await ensureChain();
+      } catch (chainError) {
+        if (chainError instanceof ChainSwitchRejectedError) {
+          setStatus(
+            <div className="flex items-center gap-2 text-sm">
+              <AlertCircle className="h-4 w-4 text-yellow-600" />
+              <span>Switch to Base to link the Snapshot proposal.</span>
+            </div>
+          );
+          setStatusLevel("info");
+          throw chainError;
+        }
+        throw chainError;
+      }
+
       // Use the mutation hook to link the snapshot proposal
       await linkSnapshotMutation.mutateAsync({
         qciNumber: BigInt(frontmatter.qci),
@@ -346,6 +369,12 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
         onStatusUpdate();
       }
     } catch (error: any) {
+      // The chain-switch path already set a quiet inline status; skip the
+      // noisy error logging and overwrite.
+      if (error instanceof ChainSwitchRejectedError) {
+        return;
+      }
+
       console.error("[SnapshotSubmitter] Failed to link Snapshot proposal:", error);
 
       // Provide more specific error messages
