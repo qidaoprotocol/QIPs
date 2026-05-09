@@ -28,10 +28,15 @@ const chainLabel = (chainId: number): string =>
  *   wallet, no session  → "Sign in to comment" button → useSiweSession.signIn()
  *   wallet + session    → renders nothing (composer takes over).
  *
- * Sign-in errors map to silent / toast surfaces:
- *   user_rejected → silent (the user just cancelled the wallet popup)
- *   verify_failed → toast (the API rejected the SIWE message)
- *   unknown       → toast (transport error, etc.)
+ * Sign-in errors map to toast surfaces:
+ *   user_rejected → info toast naming the recovery affordance. Also covers
+ *                   the silent-dismiss case where the wallet popup is
+ *                   closed without an explicit reject; useSiweSession's
+ *                   timeout synthesises a user_rejected reason so the UI
+ *                   never strands on "Signing in…".
+ *   wrong_chain   → error toast naming the target chain.
+ *   verify_failed → error toast (the API rejected the SIWE message).
+ *   unknown       → error toast (transport error, etc.).
  */
 export const SiweLoginButton: React.FC = () => {
   const { address, isConnected } = useAccount();
@@ -55,7 +60,12 @@ export const SiweLoginButton: React.FC = () => {
     <Button
       onClick={async () => {
         const result = await signIn();
-        if (result.ok || result.reason === 'user_rejected') return;
+        if (result.ok) return;
+
+        if (result.reason === 'user_rejected') {
+          toast.info("Sign-in cancelled. Click 'Sign in to comment' to try again.");
+          return;
+        }
 
         if (result.reason === 'wrong_chain') {
           const targetChainId = pickSiweChainId(walletChainId, safeDeployments);

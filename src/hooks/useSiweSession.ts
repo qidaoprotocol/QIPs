@@ -44,6 +44,14 @@ export interface UseSiweSessionResult {
 
 const STATEMENT = 'Sign in to leave a comment on this QIP.';
 const NONCE_TTL_SECONDS = 10 * 60;
+// Generous upper bound for how long a wallet may take to surface its
+// signature prompt. Some Safe-import flows (notably Rabby's) leave
+// signMessageAsync pending if the user dismisses the popup silently
+// rather than clicking reject. The timeout treats that case as a
+// cancellation so the sign-in button re-enables instead of staying stuck
+// on "Signing in…". 90s is comfortably longer than any realistic wallet
+// UX and short enough to recover before the user gives up on the page.
+const SIGN_MESSAGE_TIMEOUT_MS = 90_000;
 
 /* ─────────────────────────────────────────────────────────
    Shared session state (module-scoped singleton)
@@ -271,11 +279,29 @@ export function useSiweSession(): UseSiweSessionResult {
       const messageBody = message.prepareMessage();
 
       // 3. Sign with the connected wallet. User rejection lands in the catch.
+      // The Promise.race timeout guards against wallets that leave
+      // signMessageAsync pending forever when the user silently dismisses the
+      // popup — a finite cap is the only reliable way to recover the UI.
       let signature: string;
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
       try {
-        signature = await signMessageAsync({ message: messageBody });
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(
+            () => reject(new Error('sign_timeout')),
+            SIGN_MESSAGE_TIMEOUT_MS,
+          );
+        });
+        signature = await Promise.race([
+          signMessageAsync({ message: messageBody }),
+          timeoutPromise,
+        ]);
       } catch (err) {
         setSessionState({ ...sessionState, status: 'idle' });
+        if (err instanceof Error && err.message === 'sign_timeout') {
+          // Treat silent dismissal as a cancellation — same downstream
+          // shape as an explicit reject in the wallet.
+          return { ok: false, reason: 'user_rejected' };
+        }
         if (
           err instanceof Error &&
           /reject|denied|cancel/i.test(err.message)
@@ -283,6 +309,8 @@ export function useSiweSession(): UseSiweSessionResult {
           return { ok: false, reason: 'user_rejected' };
         }
         return { ok: false, reason: 'unknown' };
+      } finally {
+        if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
       }
 
       // 4. Verify with the API and capture the bearer token.
@@ -312,6 +340,13 @@ export function useSiweSession(): UseSiweSessionResult {
       console.error('[useSiweSession] sign-in failed before verify:', err);
       setSessionState({ ...sessionState, status: 'idle' });
       return { ok: false, reason: 'unknown' };
+    } finally {
+      // Belt-and-suspenders: every non-success path above is supposed to
+      // reset to 'idle', but if a future change ever forgets one this
+      // guarantees the UI never strands in 'signing'.
+      if (sessionState.status === 'signing') {
+        setSessionState({ ...sessionState, status: 'idle' });
+      }
     }
   }, [isConnected, walletAddress, walletChainId, safeDeployments, signMessageAsync, switchChainAsync]);
 
