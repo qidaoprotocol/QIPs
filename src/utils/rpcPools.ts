@@ -28,53 +28,83 @@ import {
 /**
  * Per-chain RPC endpoint defaults, ordered most-trusted-first.
  *
+ * Curated from chainlist (DefiLlama/chainlist's `extraRpcs.js`) with these filters:
+ *   - https only (no wss for now — websocket transport is deferred)
+ *   - no embedded API keys (`/<32-hex-chars>` patterns, `?api_key=`, etc.)
+ *   - no `tracking: "yes"` providers (Tenderly, Tatum, Lava, Numa, BloxRoute) —
+ *     they harvest operator data
+ *   - no Alchemy/Infura `/v2/demo` URLs (rate-limit immediately)
+ *   - drop URLs we've observed failing browser CORS preflight from
+ *     `qips.qidao.localhost` (e.g., 1rpc.io/op and 1rpc.io/arb)
+ *
  * The cold-start window matters: viem's fallback rank fires once on transport
  * creation, then sleeps `rank.interval` (30s) before re-probing. Until at
  * least one full probe cycle completes (~1-2s) the active transport is the
  * first entry in this list. Until ~5 minutes pass to fill the sampleCount
  * window the rank's stability score is binary, so input order continues to
  * matter. Order each chain by the most reliable / lowest-latency endpoint
- * first.
+ * first — typically the chain's official endpoint, then well-known multi-
+ * chain providers (drpc, publicnode, blastapi, 1rpc).
  *
  * Polygon defaults explicitly EXCLUDE polygon-rpc.com per the
  * polygon-psm-rpc-401-2026-04-22 learning.
+ *
+ * To refresh from chainlist: `curl -s
+ * https://raw.githubusercontent.com/DefiLlama/chainlist/main/constants/extraRpcs.js`
+ * and apply the filters above.
  */
 export const RPC_POOLS: Record<number, readonly string[]> = {
   [base.id]: [
     "https://mainnet.base.org",
-    "https://base.publicnode.com",
+    "https://base-rpc.publicnode.com",
+    "https://base.drpc.org",
     "https://base-mainnet.public.blastapi.io",
     "https://1rpc.io/base",
+    "https://base-public.nodies.app",
+    "https://base.meowrpc.com",
   ],
   [baseSepolia.id]: [
     "https://sepolia.base.org",
-    "https://base-sepolia.publicnode.com",
+    "https://base-sepolia-rpc.publicnode.com",
+    "https://base-sepolia.drpc.org",
   ],
   [mainnet.id]: [
-    "https://eth.llamarpc.com",
-    "https://ethereum.publicnode.com",
-    "https://1rpc.io/eth",
+    "https://ethereum-rpc.publicnode.com",
+    "https://eth.drpc.org",
     "https://eth-mainnet.public.blastapi.io",
+    "https://1rpc.io/eth",
+    "https://ethereum.public.blockpi.network/v1/rpc/public",
+    "https://eth.meowrpc.com",
+    "https://ethereum-public.nodies.app",
   ],
   [polygon.id]: [
     "https://polygon.drpc.org",
     "https://polygon-bor-rpc.publicnode.com",
-    "https://polygon.llamarpc.com",
     "https://1rpc.io/matic",
+    "https://polygon-public.nodies.app",
   ],
   [optimism.id]: [
     "https://mainnet.optimism.io",
-    "https://optimism.publicnode.com",
-    "https://1rpc.io/op",
+    "https://optimism-rpc.publicnode.com",
+    "https://optimism.drpc.org",
+    "https://optimism.public.blockpi.network/v1/rpc/public",
+    "https://optimism-public.nodies.app",
   ],
   [arbitrum.id]: [
     "https://arb1.arbitrum.io/rpc",
-    "https://arbitrum.publicnode.com",
-    "https://1rpc.io/arb",
+    "https://arbitrum-one-rpc.publicnode.com",
+    "https://arbitrum.drpc.org",
+    "https://arbitrum-one.public.blastapi.io",
+    "https://arbitrum.public.blockpi.network/v1/rpc/public",
+    "https://arbitrum-one-public.nodies.app",
+    "https://arbitrum.meowrpc.com",
   ],
   [gnosis.id]: [
     "https://rpc.gnosischain.com",
-    "https://gnosis.publicnode.com",
+    "https://gnosis-rpc.publicnode.com",
+    "https://gnosis.drpc.org",
+    "https://1rpc.io/gnosis",
+    "https://gnosis-public.nodies.app",
   ],
 };
 
