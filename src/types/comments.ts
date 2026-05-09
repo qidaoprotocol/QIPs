@@ -107,3 +107,27 @@ export interface ModerationRequest {
 export type ModerationResponse =
   | { ok: true; commentId: number; actionId: number }
   | { ok: false; status: 401 | 403 | 404 | 409 | 400 | 500; error: string };
+
+/* ─────────────────────────────────────────────────────────
+   Self-delete — POST /v2/comments/:id/delete
+   ───────────────────────────────────────────────────────── */
+
+/**
+ * Self-delete: an authenticated wallet removes its own comment.
+ *
+ * No `reason` field — the server forces `hiddenReason = 'self_deleted'`
+ * so a malicious client can't spoof an editor-style reason. Server-side
+ * ownership is enforced as a SQL predicate (the session-bound address must
+ * match `qipComments.author`); the 403 'not_owner' shape is for defense in
+ * depth, since the UI hides the trigger from non-authors.
+ */
+export interface DeleteOwnCommentRequest {
+  commentId: number;
+  sessionToken?: string;
+}
+
+/**
+ * Identical-shape to ModerationResponse. Reused rather than aliased so callers
+ * can pattern-match the 403 'not_owner' case against the same union members.
+ */
+export type DeleteOwnCommentResponse = ModerationResponse;
