@@ -47,10 +47,18 @@ jobs:
           # Required secrets for blockchain and Web3 functionality
           VITE_QCI_REGISTRY_ADDRESS: ${{ secrets.QCI_REGISTRY_ADDRESS }}
           VITE_BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+          # Multi-RPC pool for the viem.fallback Base transport. Comma-separated
+          # list; rank-first wins. Empty falls through to the chainlist defaults
+          # in src/utils/rpcPools.ts (curated, with CORS-broken endpoints pruned).
+          VITE_BASE_RPC_URLS: ${{ secrets.BASE_RPC_URLS }}
           VITE_WALLETCONNECT_PROJECT_ID: ${{ secrets.WALLETCONNECT_PROJECT_ID }}
-          
+
           # Required for IPFS uploads via Mai API
           VITE_IPFS_API_URL: ${{ secrets.IPFS_API_URL }}
+
+          # Frontend body byte cap; must match the API's QIP_COMMENTS_BODY_MAX_BYTES
+          # so client and server reject the same inputs. Defaults to 8192 (8 KB).
+          VITE_QIP_COMMENTS_BODY_MAX_BYTES: ${{ secrets.QIP_COMMENTS_BODY_MAX_BYTES || '8192' }}
           
           # Mai API endpoint for fetching QCIs (24x performance improvement)
           VITE_MAI_API_URL: ${{ vars.VITE_MAI_API_URL || secrets.MAI_API_URL || 'https://api.mai.finance' }}
