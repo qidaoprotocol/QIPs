@@ -5,6 +5,13 @@ import { useIsEditor } from '@/hooks/useIsEditor';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { MaiApiError } from '@/services/maiApiClient';
 import type { Comment } from '@/types/comments';
+import { Badge } from '@/components/ui/badge';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { Skeleton } from './CommentSkeleton';
 import { SafeMarkdown } from './SafeMarkdown';
 import { ModerationMenu } from './ModerationMenu';
@@ -38,6 +45,57 @@ function shortenAddress(addr: string): string {
   if (!addr.startsWith('0x') || addr.length < SHORTEN_LEAD + SHORTEN_TAIL + 2) return addr;
   return `${addr.slice(0, SHORTEN_LEAD)}…${addr.slice(-SHORTEN_TAIL)}`;
 }
+
+const DECIMAL_RE = /^-?\d+(\.\d+)?$/;
+
+// Compact form for the badge label. 1234.5 → "1.2K"; 1_500_000 → "1.5M".
+// Number() precision loss is fine here — full precision lives in the tooltip.
+function formatVpCompact(s: string): string {
+  if (!DECIMAL_RE.test(s)) return s;
+  const n = Number(s);
+  if (!Number.isFinite(n)) return s;
+  const abs = Math.abs(n);
+  if (abs >= 1e9) return `${(n / 1e9).toFixed(1).replace(/\.0$/, '')}B`;
+  if (abs >= 1e6) return `${(n / 1e6).toFixed(1).replace(/\.0$/, '')}M`;
+  if (abs >= 1e3) return `${(n / 1e3).toFixed(1).replace(/\.0$/, '')}K`;
+  // Sub-1K: show the integer part. Snapshot scores carry many decimals,
+  // and showing "0.000000000000000000" hides the meaningful zero.
+  return Math.trunc(n).toString();
+}
+
+// Full-precision tooltip form. Adds thousand-separators to the integer part,
+// trims trailing zeros from the fractional part, leaves significant digits.
+function formatVpFull(s: string): string {
+  if (!DECIMAL_RE.test(s)) return s;
+  const [intPart, fracPart] = s.split('.');
+  const formatted = Number(intPart).toLocaleString();
+  const trimmedFrac = fracPart?.replace(/0+$/, '');
+  return trimmedFrac ? `${formatted}.${trimmedFrac}` : formatted;
+}
+
+interface VpBadgeProps {
+  vpAtPost: string;
+  snapshotBlock: number | null;
+}
+
+const VpBadge: React.FC<VpBadgeProps> = ({ vpAtPost, snapshotBlock }) => {
+  const blockLine =
+    snapshotBlock !== null ? ` · block ${snapshotBlock.toLocaleString()}` : '';
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Badge variant="secondary" className="text-[10px] font-medium">
+            {formatVpCompact(vpAtPost)} aveQi
+          </Badge>
+        </TooltipTrigger>
+        <TooltipContent>
+          Verified at post — {formatVpFull(vpAtPost)} aveQi{blockLine}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+};
 
 export const CommentList: React.FC<CommentListProps> = ({ qciId }) => {
   const { comments, isLoading, isError, error, hasMore, isFetchingMore, fetchMore } = useComments(qciId);
@@ -159,6 +217,12 @@ const CommentRow: React.FC<CommentRowProps> = ({
         <div className="flex items-baseline gap-2">
           <span className="font-medium text-foreground">{display}</span>
           <span className="text-xs text-muted-foreground">{timestamp}</span>
+          {comment.vpAtPost !== null && (
+            <VpBadge
+              vpAtPost={comment.vpAtPost}
+              snapshotBlock={comment.snapshotBlock}
+            />
+          )}
           {showMenu && (
             <div className="ml-auto">
               <ModerationMenu
