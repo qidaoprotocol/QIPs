@@ -7,6 +7,8 @@
 import { QCIStatus } from './qciClient';
 import type {
   CommentListResponse,
+  DeleteOwnCommentRequest,
+  DeleteOwnCommentResponse,
   ListCommentsOptions,
   ModerationRequest,
   ModerationResponse,
@@ -374,6 +376,28 @@ export class MaiAPIClient {
         { version: string; threshold: number; ownerCount: number }
       >;
     };
+  }
+
+  /**
+   * Self-delete: the authenticated wallet removes its own comment.
+   * Reuses the moderation response shape — the 403 case carries
+   * `error: 'not_owner'` when the session address doesn't match the
+   * comment's author.
+   */
+  async deleteOwnQipComment(
+    req: DeleteOwnCommentRequest,
+  ): Promise<DeleteOwnCommentResponse> {
+    return this.commentsResultRequest<DeleteOwnCommentResponse>(
+      'POST',
+      `/v2/comments/${req.commentId}/delete`,
+      {},
+      req.sessionToken,
+      (_status, payload) => ({
+        ok: true,
+        commentId: (payload as { commentId: number }).commentId,
+        actionId: (payload as { actionId: number }).actionId,
+      }),
+    ) as Promise<DeleteOwnCommentResponse>;
   }
 
   /** Editor-only: unhide a previously hidden comment. */

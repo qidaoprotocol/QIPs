@@ -42,7 +42,7 @@ function shortenAddress(addr: string): string {
 export const CommentList: React.FC<CommentListProps> = ({ qciId }) => {
   const { comments, isLoading, isError, error, hasMore, isFetchingMore, fetchMore } = useComments(qciId);
   const { isEditor } = useIsEditor();
-  const { sessionToken } = useSiweSession();
+  const { sessionToken, address: viewerAddress } = useSiweSession();
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   // Infinite scroll: when the sentinel below the last row enters the viewport,
@@ -102,7 +102,8 @@ export const CommentList: React.FC<CommentListProps> = ({ qciId }) => {
           key={c.id}
           comment={c}
           qciId={qciId}
-          showModeration={isEditor}
+          isEditor={isEditor}
+          viewerAddress={viewerAddress}
           sessionToken={sessionToken}
         />
       ))}
@@ -120,18 +121,29 @@ export const CommentList: React.FC<CommentListProps> = ({ qciId }) => {
 interface CommentRowProps {
   comment: Comment;
   qciId: number;
-  showModeration: boolean;
+  isEditor: boolean;
+  viewerAddress?: string;
   sessionToken?: string;
 }
 
 const CommentRow: React.FC<CommentRowProps> = ({
   comment,
   qciId,
-  showModeration,
+  isEditor,
+  viewerAddress,
   sessionToken,
 }) => {
   const display = comment.ensName ?? shortenAddress(comment.author);
   const timestamp = formatDistanceToNow(new Date(comment.createdAt), { addSuffix: true });
+  const isHidden = Boolean(comment.hiddenAt);
+  const isOwner =
+    !!viewerAddress &&
+    !isHidden &&
+    viewerAddress.toLowerCase() === comment.author.toLowerCase();
+  // ModerationMenu picks its own mode internally; only render the wrapper
+  // when there's a meaningful action available, so non-editor non-owners
+  // see no trigger at all.
+  const showMenu = isEditor || isOwner;
 
   return (
     <div className="flex gap-3 border-b border-border/40 pb-6 last:border-0">
@@ -147,12 +159,15 @@ const CommentRow: React.FC<CommentRowProps> = ({
         <div className="flex items-baseline gap-2">
           <span className="font-medium text-foreground">{display}</span>
           <span className="text-xs text-muted-foreground">{timestamp}</span>
-          {showModeration && (
+          {showMenu && (
             <div className="ml-auto">
               <ModerationMenu
                 qciId={qciId}
                 commentId={comment.id}
-                isHidden={Boolean(comment.hiddenAt)}
+                commentAuthor={comment.author}
+                isHidden={isHidden}
+                viewerAddress={viewerAddress}
+                isEditor={isEditor}
                 sessionToken={sessionToken}
               />
             </div>

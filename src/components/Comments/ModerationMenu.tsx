@@ -3,6 +3,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { MoreHorizontal } from 'lucide-react';
 import { toast } from 'sonner';
 import { config } from '@/config/env';
+import { useComments } from '@/hooks/useComments';
+import { useSiweSession } from '@/hooks/useSiweSession';
 import { getMaiAPIClient } from '@/services/maiApiClient';
 import { Button } from '@/components/ui/button';
 import {
@@ -25,31 +27,66 @@ import { queryKeyPatterns, queryKeys } from '@/utils/queryKeys';
 interface ModerationMenuProps {
   qciId: number;
   commentId: number;
+  /** Lowercased 0x-prefixed comment author address. */
+  commentAuthor: string;
   isHidden: boolean;
+  /** Lowercased current SIWE-session address, or undefined when no session. */
+  viewerAddress?: string;
+  /** Editor takes precedence over owner mode when both are true. */
+  isEditor: boolean;
   sessionToken?: string;
 }
 
+type MenuMode = 'editor' | 'owner' | 'none';
+
+function pickMode(args: {
+  isEditor: boolean;
+  viewerAddress?: string;
+  commentAuthor: string;
+  isHidden: boolean;
+}): MenuMode {
+  if (args.isEditor) return 'editor';
+  if (
+    args.viewerAddress &&
+    !args.isHidden &&
+    args.viewerAddress.toLowerCase() === args.commentAuthor.toLowerCase()
+  ) {
+    return 'owner';
+  }
+  return 'none';
+}
+
 /**
- * Editor-only menu attached to each rendered comment. The visual gate (only
- * rendered when useIsEditor() returns true) is polish; the API enforces
- * authorization independently — the moderation routes call hasRole()
- * server-side before applying any change.
+ * Per-row menu attached to each rendered comment. Two display modes:
  *
- * Hide flow uses optimistic UI: the row is removed from the list cache as
- * soon as the user confirms, then we invalidate after the mutation resolves
- * to pick up the API's authoritative state. On error we re-invalidate so
- * the row reappears.
+ *   - editor: hide / restore (existing flow). Visible whenever the viewer
+ *     has EDITOR_ROLE on the QCIRegistry. Server enforces hasRole() again,
+ *     independent of this UI gate.
+ *   - owner:  delete-own (new flow). Visible when the viewer is NOT an
+ *     editor, IS the comment's author, and the comment is currently visible.
+ *     Server enforces author == session.address again as a SQL predicate.
+ *
+ * Editor takes precedence — an editor reading their own comment uses the
+ * hide flow, mirroring how every comment platform handles overlap.
  */
 export const ModerationMenu: React.FC<ModerationMenuProps> = ({
   qciId,
   commentId,
+  commentAuthor,
   isHidden,
+  viewerAddress,
+  isEditor,
   sessionToken,
 }) => {
   const queryClient = useQueryClient();
   const client = getMaiAPIClient(config.maiApiUrl);
+  const { deleteComment, isDeleting } = useComments(qciId);
+  const { clearOn401 } = useSiweSession();
   const [hideDialogOpen, setHideDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [reason, setReason] = useState('');
+
+  const mode = pickMode({ isEditor, viewerAddress, commentAuthor, isHidden });
 
   const hideMutation = useMutation({
     mutationFn: async () => {
@@ -117,6 +154,35 @@ export const ModerationMenu: React.FC<ModerationMenuProps> = ({
     },
   });
 
+  const handleConfirmDelete = async () => {
+    setDeleteDialogOpen(false);
+    const result = await deleteComment({ commentId, sessionToken });
+    if (result.ok) {
+      toast.success('Comment deleted');
+      return;
+    }
+    switch (result.status) {
+      case 401:
+        clearOn401();
+        toast.error('Your session expired. Please sign in again.');
+        break;
+      case 403:
+        // Defensive — UI should never expose Delete on a non-owned row.
+        toast.error('You can only delete your own comments.');
+        break;
+      case 404:
+        toast.error('Comment not found.');
+        break;
+      case 409:
+        toast.error('This comment is already hidden.');
+        break;
+      default:
+        toast.error(`Couldn't delete: ${result.error}`);
+    }
+  };
+
+  if (mode === 'none') return null;
+
   return (
     <>
       <DropdownMenu>
@@ -125,22 +191,32 @@ export const ModerationMenu: React.FC<ModerationMenuProps> = ({
             variant="ghost"
             size="icon"
             className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            aria-label="Moderation menu"
+            aria-label={mode === 'owner' ? 'Comment actions' : 'Moderation menu'}
           >
             <MoreHorizontal className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          {isHidden ? (
+          {mode === 'editor' && isHidden && (
             <DropdownMenuItem
               onSelect={() => unhideMutation.mutate()}
               disabled={unhideMutation.isPending}
             >
               Restore comment
             </DropdownMenuItem>
-          ) : (
+          )}
+          {mode === 'editor' && !isHidden && (
             <DropdownMenuItem onSelect={() => setHideDialogOpen(true)}>
               Hide comment
+            </DropdownMenuItem>
+          )}
+          {mode === 'owner' && (
+            <DropdownMenuItem
+              onSelect={() => setDeleteDialogOpen(true)}
+              disabled={isDeleting}
+              className="text-destructive focus:text-destructive"
+            >
+              Delete
             </DropdownMenuItem>
           )}
         </DropdownMenuContent>
@@ -183,6 +259,29 @@ export const ModerationMenu: React.FC<ModerationMenuProps> = ({
               disabled={hideMutation.isPending}
             >
               {hideMutation.isPending ? 'Hiding...' : 'Hide'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete this comment?</DialogTitle>
+            <DialogDescription>
+              This can't be undone. The comment is removed from the public view immediately.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmDelete}
+              disabled={isDeleting}
+            >
+              {isDeleting ? 'Deleting...' : 'Delete'}
             </Button>
           </DialogFooter>
         </DialogContent>
