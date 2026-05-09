@@ -11,37 +11,34 @@ import { useTheme } from "../providers/ThemeProvider";
 import { queryKeys } from "../utils/queryKeys";
 import { QCIClient } from "../services/qciClient";
 import { ALL_STATUS_NAMES, ALL_STATUS_HASHES } from "../config/statusConfig";
-import { loadBalance, getEthRPCEndpoints } from "../utils/loadBalance";
+import { buildChainTransport } from "../utils/rpcPools";
+import { attachDebugGlobal } from "../utils/rpcObservability";
+import { RpcStatusBanner } from "../components/RpcStatusBanner";
 
 // Get chains from config
 const chains = getChains();
 
-// Optional per-chain RPC overrides. Empty string falls through to viem's
-// chain-default public RPC, which is fine for the connect-time reads we do
-// on the comments path (low volume); the SIWE-verify hot path runs on
-// mai-api with paid RPCs configured per chain via QIP_COMMENTS_RPC_URL_<id>.
-const rpcEnv = (key: string): string | undefined => {
-  const value = (import.meta as any)?.env?.[key];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-};
-
-// Load-balanced transport for Ethereum mainnet (used by the QI token
-// balance check on L1). Uses the same failover + cooldown strategy as Base.
-const mainnetTransport = loadBalance(getEthRPCEndpoints().map((url) => http(url)));
-
-// Transports — mirror getChains() so every chain in the allowlist has an
-// http transport. Chains here MUST stay in sync with src/config/chains.ts;
-// missing entries silently break wagmi reads on that chain.
+// Transports — every chain (except the localBaseFork dev shim) flows through
+// buildChainTransport, which returns a memoized viem.fallback per chainId
+// with rank-based health probing, Retry-After honoring via per-http retry,
+// and observability hooks. Chains here MUST stay in sync with
+// src/config/chains.ts; missing entries silently break wagmi reads on that
+// chain. The localBaseFork shim shares base.id, so passing
+// { rpcUrlOverride: config.baseRpcUrl } gives the local Anvil flow a single-
+// endpoint transport without the pool/observability overhead.
 const transports = {
   [localBaseFork.id]: http(config.baseRpcUrl),
-  [base.id]: http(rpcEnv("VITE_BASE_RPC_URL") ?? config.baseRpcUrl),
-  [baseSepolia.id]: http(rpcEnv("VITE_BASE_SEPOLIA_RPC_URL")),
-  [mainnet.id]: mainnetTransport,
-  [optimism.id]: http(rpcEnv("VITE_OPTIMISM_RPC_URL")),
-  [gnosis.id]: http(rpcEnv("VITE_GNOSIS_RPC_URL")),
-  [polygon.id]: http(rpcEnv("VITE_POLYGON_RPC_URL")),
-  [arbitrum.id]: http(rpcEnv("VITE_ARBITRUM_RPC_URL")),
+  [base.id]: buildChainTransport(base.id),
+  [baseSepolia.id]: buildChainTransport(baseSepolia.id),
+  [mainnet.id]: buildChainTransport(mainnet.id),
+  [optimism.id]: buildChainTransport(optimism.id),
+  [gnosis.id]: buildChainTransport(gnosis.id),
+  [polygon.id]: buildChainTransport(polygon.id),
+  [arbitrum.id]: buildChainTransport(arbitrum.id),
 };
+
+// Attach window.__qipsRpc in dev so console-level debugging works.
+attachDebugGlobal();
 
 // Wagmi configuration
 const wagmiConfig = createConfig({
@@ -170,6 +167,7 @@ export const Web3Provider: React.FC<Web3ProviderProps> = ({ children }) => {
           }}
         >
           {children}
+          <RpcStatusBanner />
         </ConnectKitProvider>
         {config.isDevelopment && <ReactQueryDevtools initialIsOpen={false} />}
       </QueryClientProvider>
