@@ -32,42 +32,22 @@ interface ModerationMenuProps {
   isHidden: boolean;
   /** Lowercased current SIWE-session address, or undefined when no session. */
   viewerAddress?: string;
-  /** Editor takes precedence over owner mode when both are true. */
+  /** Whether the viewer holds EDITOR_ROLE on the registry. */
   isEditor: boolean;
   sessionToken?: string;
 }
 
-type MenuMode = 'editor' | 'owner' | 'none';
-
-function pickMode(args: {
-  isEditor: boolean;
-  viewerAddress?: string;
-  commentAuthor: string;
-  isHidden: boolean;
-}): MenuMode {
-  if (args.isEditor) return 'editor';
-  if (
-    args.viewerAddress &&
-    !args.isHidden &&
-    args.viewerAddress.toLowerCase() === args.commentAuthor.toLowerCase()
-  ) {
-    return 'owner';
-  }
-  return 'none';
-}
-
 /**
- * Per-row menu attached to each rendered comment. Two display modes:
+ * Per-row menu attached to each rendered comment. Renders applicable
+ * actions independently — an editor viewing their own visible comment
+ * sees BOTH "Hide" (editor action) and "Delete" (owner action), since
+ * they're distinct operations: Hide is reversible and audit-tagged with
+ * an editor reason; Delete is irreversible self-removal. Server enforces
+ * each action's authorization independently of these UI gates.
  *
- *   - editor: hide / restore (existing flow). Visible whenever the viewer
- *     has EDITOR_ROLE on the QCIRegistry. Server enforces hasRole() again,
- *     independent of this UI gate.
- *   - owner:  delete-own (new flow). Visible when the viewer is NOT an
- *     editor, IS the comment's author, and the comment is currently visible.
- *     Server enforces author == session.address again as a SQL predicate.
- *
- * Editor takes precedence — an editor reading their own comment uses the
- * hide flow, mirroring how every comment platform handles overlap.
+ *   Editor (hide/restore): renders when isEditor === true.
+ *   Owner  (delete):       renders when viewerAddress matches comment.author
+ *                          AND the comment is currently visible.
  */
 export const ModerationMenu: React.FC<ModerationMenuProps> = ({
   qciId,
@@ -86,7 +66,11 @@ export const ModerationMenu: React.FC<ModerationMenuProps> = ({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [reason, setReason] = useState('');
 
-  const mode = pickMode({ isEditor, viewerAddress, commentAuthor, isHidden });
+  const canDeleteOwn =
+    !!viewerAddress &&
+    !isHidden &&
+    viewerAddress.toLowerCase() === commentAuthor.toLowerCase();
+  const showMenu = isEditor || canDeleteOwn;
 
   const hideMutation = useMutation({
     mutationFn: async () => {
@@ -181,7 +165,7 @@ export const ModerationMenu: React.FC<ModerationMenuProps> = ({
     }
   };
 
-  if (mode === 'none') return null;
+  if (!showMenu) return null;
 
   return (
     <>
@@ -191,13 +175,13 @@ export const ModerationMenu: React.FC<ModerationMenuProps> = ({
             variant="ghost"
             size="icon"
             className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            aria-label={mode === 'owner' ? 'Comment actions' : 'Moderation menu'}
+            aria-label="Comment actions"
           >
             <MoreHorizontal className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          {mode === 'editor' && isHidden && (
+          {isEditor && isHidden && (
             <DropdownMenuItem
               onSelect={() => unhideMutation.mutate()}
               disabled={unhideMutation.isPending}
@@ -205,12 +189,12 @@ export const ModerationMenu: React.FC<ModerationMenuProps> = ({
               Restore comment
             </DropdownMenuItem>
           )}
-          {mode === 'editor' && !isHidden && (
+          {isEditor && !isHidden && (
             <DropdownMenuItem onSelect={() => setHideDialogOpen(true)}>
               Hide comment
             </DropdownMenuItem>
           )}
-          {mode === 'owner' && (
+          {canDeleteOwn && (
             <DropdownMenuItem
               onSelect={() => setDeleteDialogOpen(true)}
               disabled={isDeleting}
