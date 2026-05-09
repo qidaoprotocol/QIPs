@@ -105,15 +105,23 @@ export class QCIClient {
       ? baseSepolia
       : base;
 
-    // Route through the shared per-chain pool factory. When the caller
-    // passed an explicit rpcUrl arg (Anvil forks, per-call routing), the
-    // factory honors it as a single-endpoint override and bypasses the
-    // pool/observability layer. Without an override, the factory returns
-    // the memoized fallback transport for that chain — same instance used
-    // by Web3Provider, so there is exactly one rank loop per chain across
-    // every QCIClient instantiation site.
+    // Route through the shared per-chain pool factory. The rpcUrl arg only
+    // becomes an override when it points at localhost (Anvil forks); for any
+    // other URL we ignore it and fall through to the pool. Rationale: every
+    // QCIClient instantiation site passes config.baseRpcUrl as rpcUrl, but
+    // their intent is "use the production RPC for Base", not "force this
+    // exact URL with no failover". Honoring the rpcUrl arg as a strict
+    // override for non-localhost URLs collapses the multi-endpoint pool to
+    // a single endpoint — exactly the rate-limit-storm the pool was built
+    // to prevent. Localhost URLs are different: those flag an explicit
+    // Anvil-fork dev flow where the pool semantics are wrong.
+    //
+    // Without an override, the factory returns the memoized fallback
+    // transport for that chain — the same instance used by Web3Provider,
+    // so there is exactly one rank loop per chain across every QCIClient
+    // instantiation site.
     const transport = buildChainTransport(chain.id, {
-      rpcUrlOverride: rpcUrl || undefined,
+      rpcUrlOverride: isLocal ? rpcUrl : undefined,
     });
 
     this.publicClient = createPublicClient({
