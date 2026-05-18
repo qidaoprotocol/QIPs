@@ -12,28 +12,43 @@ import { queryKeys } from "../utils/queryKeys";
 import { QCIClient } from "../services/qciClient";
 import { ALL_STATUS_NAMES, ALL_STATUS_HASHES } from "../config/statusConfig";
 import { buildChainTransport, buildLazyChainTransport } from "../utils/rpcPools";
-import { attachDebugGlobal } from "../utils/rpcObservability";
+import { attachDebugGlobal, hydrate as hydrateRpcHealth } from "../utils/rpcObservability";
 import { RpcStatusBanner } from "../components/RpcStatusBanner";
+
+// Canonical module-init boot order (per plan 2026-05-18-001):
+//
+//   1. hydrateRpcHealth() — reads persisted endpoint-health from localStorage
+//      and seeds in-memory terminal states + restarts F10 recovery timers.
+//      Must run BEFORE buildChainTransport so the composition-time filter in
+//      buildChainTransport sees the hydrated denied set.
+//   2. attachDebugGlobal() — exposes window.__qipsRpc, populated by the
+//      already-hydrated state.
+//   3. const transports = { ... buildChainTransport(...) ... } — composes
+//      pools with denied endpoints filtered out.
+//
+// Statement order in this file IS the execution order at module load.
+hydrateRpcHealth();
+attachDebugGlobal();
 
 // Get chains from config
 const chains = getChains();
 
 // Transports — every chain (except the localBaseFork dev shim) flows through
 // buildChainTransport, which returns a memoized viem.fallback per chainId
-// with rank-based health probing, Retry-After honoring via per-http retry,
-// and observability hooks. Chains here MUST stay in sync with
-// src/config/chains.ts; missing entries silently break wagmi reads on that
-// chain. The localBaseFork shim shares base.id, so passing
-// { rpcUrlOverride: config.baseRpcUrl } gives the local Anvil flow a single-
-// endpoint transport without the pool/observability overhead.
+// with Retry-After honoring via per-http retry and observability hooks.
+// Chains here MUST stay in sync with src/config/chains.ts; missing entries
+// silently break wagmi reads on that chain. The localBaseFork shim shares
+// base.id, so passing { rpcUrlOverride: config.baseRpcUrl } gives the local
+// Anvil flow a single-endpoint transport without the pool/observability
+// overhead.
 //
 // Base is the QCI registry chain and is always touched on initial load, so it
 // uses the eager `buildChainTransport`. The other chains are only read when
 // the user's wallet switches to them or a multi-chain view needs them, so
-// they use `buildLazyChainTransport` to defer viem's fallback rank scheduler
-// until first use. Without lazy init these chains fire ~6 probe requests each
-// within a second of page load — ~40 wasted RPCs that contribute nothing to
-// the QCI list rendering.
+// they use `buildLazyChainTransport` to defer viem.fallback construction
+// (and its observability registration) until first use. Without lazy init
+// these chains' transports would be constructed at module load even though
+// the page never touches them.
 const transports = {
   [localBaseFork.id]: http(config.baseRpcUrl),
   [base.id]: buildChainTransport(base.id),
@@ -44,9 +59,6 @@ const transports = {
   [polygon.id]: buildLazyChainTransport(polygon.id),
   [arbitrum.id]: buildLazyChainTransport(arbitrum.id),
 };
-
-// Attach window.__qipsRpc in dev so console-level debugging works.
-attachDebugGlobal();
 
 // Wagmi configuration
 const wagmiConfig = createConfig({

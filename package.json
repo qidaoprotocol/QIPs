@@ -14,6 +14,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "test": "node node_modules/vitest/vitest.mjs run",
+    "test:watch": "node node_modules/vitest/vitest.mjs",
     "clean": "rm -rf dist",
     "deploy:contracts": "forge script script/Deploy.s.sol --rpc-url $BASE_RPC_URL --broadcast",
     "deploy:production": "./scripts/deploy-production.sh",
@@ -80,8 +82,10 @@
     "@types/react-router-dom": "^5.3.3",
     "@vitejs/plugin-react": "^4.6.0",
     "dotenv": "^17.2.0",
+    "happy-dom": "^20.9.0",
     "react-router-dom": "^7.7.0",
     "typescript": "^5.1.6",
-    "vite": "^7.0.4"
+    "vite": "^7.0.4",
+    "vitest": "^2"
   }
 }

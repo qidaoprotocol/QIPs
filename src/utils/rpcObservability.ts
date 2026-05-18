@@ -18,6 +18,7 @@
  */
 
 import { base, baseSepolia, mainnet, polygon, optimism, gnosis, arbitrum } from "viem/chains";
+import { RPC_POOLS, getPoolEndpoints } from "./poolEndpoints";
 
 export type EndpointState =
   | "unknown"
@@ -139,10 +140,11 @@ function setState(chainId: number, url: string, next: EndpointState): boolean {
   h.state = next;
   if (TERMINAL_STATES.has(next)) {
     h.demotedAt = Date.now();
-  } else if (h.state === "healthy") {
+  } else if (next === "healthy") {
     h.demotedAt = undefined;
   }
   emit("endpoint:state-change", { chainId, url, state: next });
+  scheduleDehydrate();
   return true;
 }
 
@@ -468,7 +470,7 @@ export function attachDebugGlobal(): void {
 }
 
 /** Reset module state. Test-only; not used in production. */
-export function __resetForTests(): void {
+export function __resetForTests(opts: { keepStorage?: boolean } = {}): void {
   state.chains.clear();
   state.registrations.clear();
   for (const t of state.recoveryTimers.values()) clearTimeout(t);
@@ -476,4 +478,343 @@ export function __resetForTests(): void {
   state.exhaustedChains.clear();
   state.inFlightProbes.clear();
   listeners.clear();
+  if (dehydrateTimer) {
+    clearTimeout(dehydrateTimer);
+    dehydrateTimer = null;
+  }
+  if (!opts.keepStorage && typeof window !== "undefined" && window.localStorage) {
+    try {
+      window.localStorage.removeItem(PERSIST_KEY);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+// ─── Endpoint-health persistence ────────────────────────────────────────────
+//
+// Survives page loads by writing terminal-state endpoints (and recent healthy
+// ones) to localStorage. On the next session, `hydrate()` reads the blob,
+// validates it against the current pool composition (via `poolHash`), and
+// reseeds in-memory state so the cold reload skips re-discovering the same
+// bad endpoint.
+//
+// Asymmetric TTL: positive (healthy) entries live 24h; terminal entries live
+// 1h to match `AUTO_RECOVERY_DELAYS_MS[0]` so a session ending just before
+// the first F10 probe doesn't pin the endpoint as bad indefinitely.
+//
+// pool-hash invalidation: when `RPC_POOLS` or any env override changes, the
+// computed hash differs from the persisted one and the entire blob is
+// dropped. Stale URLs that survive a partial pool edit are also filtered.
+//
+// Plan: docs/plans/2026-05-18-001-fix-base-rpc-pool-tuning-plan.md
+
+const PERSIST_KEY = "qips:rpc-health:v1";
+const POSITIVE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+const TERMINAL_TTL_MS = 60 * 60 * 1000; // 1h — matches AUTO_RECOVERY_DELAYS_MS[0]
+const DEHYDRATE_THROTTLE_MS = 1000;
+
+type PersistableState = "healthy" | "cors-blocked" | "auth-rejected";
+
+interface PersistedEntry {
+  state: PersistableState;
+  demotedAt?: number;
+  hadOkSample: boolean;
+}
+
+interface PersistedBlob {
+  poolHash: string;
+  ts: number;
+  entries: Record<number, Record<string, PersistedEntry>>;
+}
+
+/**
+ * cyrb53 — small, deterministic, sync 53-bit hash. MIT-licensed.
+ * Source: https://github.com/bryc/code/blob/master/jshash/hashes/cyrb53.js
+ *
+ * Cryptographic strength is unnecessary — we need "any pool edit produces a
+ * different hash," not collision resistance. SubtleCrypto.digest is async
+ * and would break the sync hydrate path.
+ */
+function cyrb53(input: string, seed = 0): string {
+  let h1 = 0xdeadbeef ^ seed;
+  let h2 = 0x41c6ce57 ^ seed;
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
+  h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
+  h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  const result = 4294967296 * (2097151 & h2) + (h1 >>> 0);
+  return result.toString(16);
+}
+
+/**
+ * Compute a stable hash of the source-of-truth pool composition.
+ *
+ * Uses RPC_POOLS + env overrides via getPoolEndpoints(chainId) — NOT
+ * state.registrations, because registrations don't exist yet at hydrate
+ * time. The canonical boot order has registrations happening later, inside
+ * buildChainTransport.
+ */
+function getPoolHash(): string {
+  const chainIds = Object.keys(RPC_POOLS).map(Number).sort((a, b) => a - b);
+  const payload: Record<number, string[]> = {};
+  for (const chainId of chainIds) {
+    const endpoints = [...getPoolEndpoints(chainId)].sort();
+    payload[chainId] = endpoints;
+  }
+  return cyrb53(JSON.stringify(payload));
+}
+
+let dehydrateTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleDehydrate(): void {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  if (dehydrateTimer) return; // a write is already pending; final write captures latest state
+  dehydrateTimer = setTimeout(() => {
+    dehydrateTimer = null;
+    dehydrate();
+  }, DEHYDRATE_THROTTLE_MS);
+}
+
+/**
+ * Write current persistable state to localStorage. Soft-fails on quota or
+ * SSR-style absence of `localStorage`. Normally invoked via the throttled
+ * `scheduleDehydrate`; tests can call directly.
+ */
+export function dehydrate(): void {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try {
+    const entries: Record<number, Record<string, PersistedEntry>> = {};
+    for (const [chainId, chain] of state.chains.entries()) {
+      const inner: Record<string, PersistedEntry> = {};
+      for (const [url, h] of chain.entries()) {
+        if (
+          h.state === "healthy" ||
+          h.state === "cors-blocked" ||
+          h.state === "auth-rejected"
+        ) {
+          inner[url] = {
+            state: h.state,
+            demotedAt: h.demotedAt,
+            hadOkSample: h.hadOkSample,
+          };
+        }
+      }
+      if (Object.keys(inner).length > 0) entries[chainId] = inner;
+    }
+    const blob: PersistedBlob = {
+      poolHash: getPoolHash(),
+      ts: Date.now(),
+      entries,
+    };
+    window.localStorage.setItem(PERSIST_KEY, JSON.stringify(blob));
+  } catch {
+    // Quota errors, JSON failures — swallow. Persistence is best-effort;
+    // missing it does not break in-memory observability.
+  }
+}
+
+/**
+ * Test-only helper to synchronously flush the throttled dehydrate timer.
+ * Production paths rely on the setTimeout firing naturally.
+ */
+export function flushDehydrateForTests(): void {
+  if (dehydrateTimer) {
+    clearTimeout(dehydrateTimer);
+    dehydrateTimer = null;
+  }
+  dehydrate();
+}
+
+function isPersistedEntryShape(value: unknown): value is PersistedEntry {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    (v.state === "healthy" ||
+      v.state === "cors-blocked" ||
+      v.state === "auth-rejected") &&
+    (v.demotedAt === undefined || typeof v.demotedAt === "number") &&
+    typeof v.hadOkSample === "boolean"
+  );
+}
+
+function isPersistedBlobShape(value: unknown): value is PersistedBlob {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  if (typeof v.poolHash !== "string" || typeof v.ts !== "number") return false;
+  if (typeof v.entries !== "object" || v.entries === null) return false;
+  // Don't deep-validate every entry — isPersistedEntryShape gates each entry
+  // at hydrate time. Shape validation here just catches obvious corruption.
+  return true;
+}
+
+/**
+ * Restore terminal and recent-healthy endpoint state from localStorage.
+ *
+ * Canonical boot-order placement: called from `Web3Provider.tsx` at module
+ * init BEFORE `attachDebugGlobal()` and BEFORE any `buildChainTransport`,
+ * so `getDeniedEndpointsForChain` returns the seeded set when
+ * `buildChainTransport` first composes its pool.
+ *
+ * Validates: versioned key (PERSIST_KEY), shape, top-level freshness
+ * (24h cap), per-entry TTL (asymmetric), pool-hash match against current
+ * `RPC_POOLS` + env. On any failure the blob is removed and hydration is a
+ * silent no-op (this also covers private-mode browsers / quota errors).
+ */
+export function hydrate(): void {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  let raw: string | null = null;
+  try {
+    raw = window.localStorage.getItem(PERSIST_KEY);
+  } catch {
+    return;
+  }
+  if (!raw) return;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    safeRemove();
+    return;
+  }
+  if (!isPersistedBlobShape(parsed)) {
+    safeRemove();
+    return;
+  }
+  const blob = parsed;
+
+  const now = Date.now();
+  // Top-level freshness — blobs older than POSITIVE_TTL_MS are discarded
+  // wholesale to avoid carrying ancient state forward.
+  if (now - blob.ts > POSITIVE_TTL_MS) {
+    safeRemove();
+    return;
+  }
+
+  // Pool-composition hash check — invalidate on any RPC_POOLS or env edit.
+  if (blob.poolHash !== getPoolHash()) {
+    safeRemove();
+    return;
+  }
+
+  for (const [chainIdStr, chainEntries] of Object.entries(blob.entries)) {
+    const chainId = Number(chainIdStr);
+    if (!Number.isFinite(chainId)) continue;
+    const knownUrls = new Set(getPoolEndpoints(chainId));
+
+    for (const [url, entry] of Object.entries(chainEntries)) {
+      if (!isPersistedEntryShape(entry)) continue;
+      // Stale URLs (no longer in the current pool) are silently dropped.
+      if (!knownUrls.has(url)) continue;
+
+      // Per-entry TTL.
+      const entryAge = now - blob.ts;
+      const isTerminal =
+        entry.state === "cors-blocked" || entry.state === "auth-rejected";
+      if (isTerminal && entryAge > TERMINAL_TTL_MS) continue;
+      if (!isTerminal && entryAge > POSITIVE_TTL_MS) continue;
+
+      _setStateFromHydration(chainId, url, entry);
+    }
+  }
+}
+
+function safeRemove(): void {
+  try {
+    window.localStorage.removeItem(PERSIST_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Internal: seed an endpoint's state from a persisted entry without
+ * triggering the dehydrate throttle (would cause an immediate re-write of
+ * what we just read) and, for terminal states, restart the F10 timer at
+ * the correct elapsed offset.
+ */
+function _setStateFromHydration(
+  chainId: number,
+  url: string,
+  entry: PersistedEntry,
+): void {
+  const h = ensureEndpoint(chainId, url);
+  h.state = entry.state;
+  h.hadOkSample = entry.hadOkSample;
+  if (entry.demotedAt !== undefined) h.demotedAt = entry.demotedAt;
+  // No emit, no dehydrate trigger — this is a hydration, not a transition.
+
+  if (entry.state === "cors-blocked" || entry.state === "auth-rejected") {
+    _restartF10TimerFromDemotedAt(chainId, url, entry.demotedAt ?? Date.now());
+  }
+}
+
+/**
+ * Restart the F10 auto-recovery scheduler at the slot whose cumulative delay
+ * has not yet elapsed since `demotedAt`. Clamps at 0 (fire immediately) if
+ * the entry sat past the final slot.
+ */
+function _restartF10TimerFromDemotedAt(
+  chainId: number,
+  url: string,
+  demotedAt: number,
+): void {
+  const elapsed = Math.max(0, Date.now() - demotedAt);
+  let cumulative = 0;
+  for (let idx = 0; idx < AUTO_RECOVERY_DELAYS_MS.length; idx += 1) {
+    cumulative += AUTO_RECOVERY_DELAYS_MS[idx];
+    if (elapsed < cumulative) {
+      const remaining = Math.max(0, cumulative - elapsed);
+      _scheduleAtIndexWithDelay(chainId, url, demotedAt, idx, remaining);
+      return;
+    }
+  }
+  // Past the final slot — fire immediately at the last index.
+  _scheduleAtIndexWithDelay(
+    chainId,
+    url,
+    demotedAt,
+    AUTO_RECOVERY_DELAYS_MS.length - 1,
+    0,
+  );
+}
+
+function _scheduleAtIndexWithDelay(
+  chainId: number,
+  url: string,
+  demotedAt: number,
+  attemptIndex: number,
+  delayMs: number,
+): void {
+  const key = `${chainId}::${url}`;
+  const prior = state.recoveryTimers.get(key);
+  if (prior) clearTimeout(prior);
+  const timer = setTimeout(() => {
+    runAutoRecoveryProbe(chainId, url, key, demotedAt, attemptIndex).catch((err) => {
+      console.error("[rpcObservability] auto-recovery probe threw", err);
+    });
+  }, delayMs);
+  state.recoveryTimers.set(key, timer);
+}
+
+/**
+ * URLs in terminal state for the given chain. Used by `buildChainTransport`
+ * (U5) to filter the pool composition before constructing `fallback(...)`.
+ */
+export function getDeniedEndpointsForChain(chainId: number): Set<string> {
+  const out = new Set<string>();
+  const chain = state.chains.get(chainId);
+  if (!chain) return out;
+  for (const [url, h] of chain.entries()) {
+    if (h.state === "cors-blocked" || h.state === "auth-rejected") {
+      out.add(url);
+    }
+  }
+  return out;
 }
