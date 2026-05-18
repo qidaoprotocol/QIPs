@@ -6,15 +6,6 @@ import {
   ContractFunctionExecutionError,
 } from "viem";
 import {
-  arbitrum,
-  base,
-  baseSepolia,
-  gnosis,
-  mainnet,
-  optimism,
-  polygon,
-} from "viem/chains";
-import {
   recordRequest,
   recordResponse,
   recordCorsBlocked,
@@ -23,172 +14,15 @@ import {
   scheduleAutoRecovery,
   forceProbeChain,
   observabilityHandle,
+  getDeniedEndpointsForChain,
 } from "./rpcObservability";
+import { RPC_POOLS, getPoolEndpoints } from "./poolEndpoints";
 
-/**
- * Per-chain RPC endpoint defaults, ordered most-trusted-first.
- *
- * Curated from chainlist (DefiLlama/chainlist's `extraRpcs.js`) with these filters:
- *   - https only (no wss for now — websocket transport is deferred)
- *   - no embedded API keys (`/<32-hex-chars>` patterns, `?api_key=`, etc.)
- *   - no `tracking: "yes"` providers (Tenderly, Tatum, Lava, Numa, BloxRoute) —
- *     they harvest operator data
- *   - no Alchemy/Infura `/v2/demo` URLs (rate-limit immediately)
- *   - drop URLs we've observed failing browser CORS preflight from
- *     `qips.qidao.localhost` (e.g., 1rpc.io/op and 1rpc.io/arb)
- *
- * The cold-start window matters: viem's fallback rank fires once on transport
- * creation, then sleeps `rank.interval` (30s) before re-probing. Until at
- * least one full probe cycle completes (~1-2s) the active transport is the
- * first entry in this list. Until ~5 minutes pass to fill the sampleCount
- * window the rank's stability score is binary, so input order continues to
- * matter. Order each chain by the most reliable / lowest-latency endpoint
- * first — typically the chain's official endpoint, then well-known multi-
- * chain providers (drpc, publicnode, blastapi, 1rpc).
- *
- * Polygon defaults explicitly EXCLUDE polygon-rpc.com per the
- * polygon-psm-rpc-401-2026-04-22 learning.
- *
- * To refresh from chainlist: `curl -s
- * https://raw.githubusercontent.com/DefiLlama/chainlist/main/constants/extraRpcs.js`
- * and apply the filters above.
- */
-export const RPC_POOLS: Record<number, readonly string[]> = {
-  [base.id]: [
-    "https://mainnet.base.org",
-    "https://base-rpc.publicnode.com",
-    "https://base.drpc.org",
-    "https://base-mainnet.public.blastapi.io",
-    "https://1rpc.io/base",
-    "https://base-public.nodies.app",
-    "https://base.meowrpc.com",
-  ],
-  [baseSepolia.id]: [
-    "https://sepolia.base.org",
-    "https://base-sepolia-rpc.publicnode.com",
-    "https://base-sepolia.drpc.org",
-  ],
-  [mainnet.id]: [
-    "https://ethereum-rpc.publicnode.com",
-    "https://eth.drpc.org",
-    "https://eth-mainnet.public.blastapi.io",
-    "https://1rpc.io/eth",
-    "https://ethereum.public.blockpi.network/v1/rpc/public",
-    "https://eth.meowrpc.com",
-    "https://ethereum-public.nodies.app",
-  ],
-  [polygon.id]: [
-    "https://polygon.drpc.org",
-    "https://polygon-bor-rpc.publicnode.com",
-    "https://1rpc.io/matic",
-    "https://polygon-public.nodies.app",
-  ],
-  [optimism.id]: [
-    "https://mainnet.optimism.io",
-    "https://optimism-rpc.publicnode.com",
-    "https://optimism.drpc.org",
-    "https://optimism.public.blockpi.network/v1/rpc/public",
-    "https://optimism-public.nodies.app",
-  ],
-  [arbitrum.id]: [
-    "https://arb1.arbitrum.io/rpc",
-    "https://arbitrum-one-rpc.publicnode.com",
-    "https://arbitrum.drpc.org",
-    "https://arbitrum-one.public.blastapi.io",
-    "https://arbitrum.public.blockpi.network/v1/rpc/public",
-    "https://arbitrum-one-public.nodies.app",
-    "https://arbitrum.meowrpc.com",
-  ],
-  [gnosis.id]: [
-    "https://rpc.gnosischain.com",
-    "https://gnosis-rpc.publicnode.com",
-    "https://gnosis.drpc.org",
-    "https://1rpc.io/gnosis",
-    "https://gnosis-public.nodies.app",
-  ],
-};
-
-const ENV_KEY_BY_CHAIN_ID: Record<number, { single: string; list: string }> = {
-  [base.id]: { single: "VITE_BASE_RPC_URL", list: "VITE_BASE_RPC_URLS" },
-  [baseSepolia.id]: {
-    single: "VITE_BASE_SEPOLIA_RPC_URL",
-    list: "VITE_BASE_SEPOLIA_RPC_URLS",
-  },
-  [mainnet.id]: { single: "VITE_MAINNET_RPC_URL", list: "VITE_MAINNET_RPC_URLS" },
-  [polygon.id]: { single: "VITE_POLYGON_RPC_URL", list: "VITE_POLYGON_RPC_URLS" },
-  [optimism.id]: {
-    single: "VITE_OPTIMISM_RPC_URL",
-    list: "VITE_OPTIMISM_RPC_URLS",
-  },
-  [arbitrum.id]: {
-    single: "VITE_ARBITRUM_RPC_URL",
-    list: "VITE_ARBITRUM_RPC_URLS",
-  },
-  [gnosis.id]: { single: "VITE_GNOSIS_RPC_URL", list: "VITE_GNOSIS_RPC_URLS" },
-};
-
-function readEnv(key: string): string | undefined {
-  // Mirrors src/config/env.ts:getEnvVar exactly. The optional-chaining variant
-  // I tried first does not consistently surface VITE_* env vars in Vite's
-  // dev pipeline; the explicit typeof guard does.
-  let value: string | undefined;
-  try {
-    if (typeof import.meta !== "undefined" && (import.meta as unknown as { env?: Record<string, string> }).env) {
-      value = (import.meta as unknown as { env: Record<string, string> }).env[key];
-    }
-  } catch {
-    // import.meta is unavailable in some SSR / test contexts.
-  }
-  if (!value && typeof process !== "undefined" && process.env?.[key]) {
-    value = process.env[key];
-  }
-  if (typeof value === "string" && value.length > 0) return value;
-  return undefined;
-}
-
-function readBoolEnv(key: string): boolean {
-  return readEnv(key) === "true";
-}
-
-/**
- * Resolve the endpoint list for a chain.
- *
- * Precedence (top wins):
- *   1. VITE_<CHAIN>_RPC_URLS (comma-split list).
- *   2. VITE_<CHAIN>_RPC_URL (single override; treated as a strict one-element
- *      pool, NOT appended to defaults).
- *   3. RPC_POOLS[chainId] defaults.
- *
- * Local-mode short-circuit: when VITE_LOCAL_MODE=true and the singular
- * VITE_BASE_RPC_URL points at localhost, return only that one URL for base.id
- * regardless of the pool. Preserves the Anvil fork pattern.
- */
-export function getPoolEndpoints(chainId: number): string[] {
-  const envKeys = ENV_KEY_BY_CHAIN_ID[chainId];
-  const localMode = readBoolEnv("VITE_LOCAL_MODE");
-  const singleBaseRpc = readEnv("VITE_BASE_RPC_URL");
-  if (
-    chainId === base.id &&
-    localMode &&
-    singleBaseRpc &&
-    (singleBaseRpc.includes("localhost") || singleBaseRpc.includes("127.0.0.1"))
-  ) {
-    return [singleBaseRpc];
-  }
-  if (envKeys) {
-    const list = readEnv(envKeys.list);
-    if (list) {
-      return list
-        .split(",")
-        .map((url) => url.trim())
-        .filter(Boolean);
-    }
-    const single = readEnv(envKeys.single);
-    if (single) return [single];
-  }
-  const defaults = RPC_POOLS[chainId];
-  return defaults ? [...defaults] : [];
-}
+// Re-export so existing consumers (and tests) can import these from rpcPools
+// without churn while the modules settle. `RPC_POOLS` and `getPoolEndpoints`
+// are owned by `poolEndpoints.ts` (extracted to break the circular import
+// rpcPools ↔ rpcObservability when the latter computes a pool-hash).
+export { RPC_POOLS, getPoolEndpoints };
 
 /**
  * Memoized module-scope cache so every consumer of buildChainTransport for
@@ -266,9 +100,42 @@ export function buildChainTransport(
         `No RPC pool configured for chain ${chainId}. Add an entry to RPC_POOLS in src/utils/rpcPools.ts or set VITE_<CHAIN>_RPC_URL[S].`,
       );
     }
-    const childTransports = endpoints.map((url) =>
+
+    // Composition-time filter: drop URLs that hydrate() seeded as terminal
+    // (cors-blocked / auth-rejected). This is what gives warm reloads their
+    // payoff — endpoints the previous session learned were bad never get
+    // contacted on the next page load until the F10 scheduler tries them.
+    //
+    // Edge case: every endpoint is denied. Fall back to the full pool rather
+    // than constructing a zero-endpoint fallback (which would throw inside
+    // viem). The pool-exhausted banner will surface naturally on actual
+    // request failure, and forceProbeChain (Retry button) can recover.
+    // This is the documented R2 exception in the plan.
+    const denied = getDeniedEndpointsForChain(chainId);
+    const allowedEndpoints = endpoints.filter((url) => !denied.has(url));
+    const activeEndpoints =
+      allowedEndpoints.length > 0 ? allowedEndpoints : endpoints;
+    if (allowedEndpoints.length === 0 && denied.size > 0) {
+      console.warn(
+        `[rpcPools] All endpoints for chain ${chainId} denied at compose time — using full pool with banner state.`,
+      );
+    }
+
+    // observabilityHandle.register below registers the FULL set (including
+    // denied endpoints) so the banner state and F10 scheduler still see the
+    // complete picture. The filter only affects which transports viem's
+    // fallback walks at request time.
+    const childTransports = activeEndpoints.map((url) =>
       http(url, {
-        retryCount: 3,
+        // retryCount: 1 (down from 3) per plan 2026-05-18-001 to cut the
+        // worst-case per-endpoint amplifier from (1 + 3) to (1 + 1) attempts.
+        // Construction-time wins over the runtime-zeroed value fallback
+        // passes — verified at node_modules/viem/_esm/clients/transports/
+        // http.js:15 (`const retryCount = config.retryCount ?? retryCount_`).
+        // viem's Retry-After handling still fires on the single retry per
+        // the `shouldRetry` whitelist in node_modules/viem/_esm/utils/
+        // buildRequest.js (covers 408/413/429/500/502/503/504).
+        retryCount: 1,
         retryDelay: 150,
         onFetchRequest: () => {
           recordRequest(chainId, url);
@@ -308,19 +175,26 @@ export function buildChainTransport(
     // we catch it via a thin wrapper transport that intercepts the error and
     // records before re-throwing. The fallback transport then sees a normal
     // rejection and moves on.
+    // Index into `activeEndpoints` (the filtered set used to build
+    // childTransports) — NOT `endpoints` (which would be misaligned when
+    // any URL was filtered out).
     const wrappedTransports = childTransports.map((t, idx) =>
-      wrapWithFetchErrorObserver(t, chainId, endpoints[idx]),
+      wrapWithFetchErrorObserver(t, chainId, activeEndpoints[idx]),
     );
 
+    // Rank disabled per plan 2026-05-18-001 (production-consensus prior art:
+    // Uniswap, Reown AppKit, Aave, Sushiswap, Dyad, gnars all run with
+    // rank: false). Composition is deterministic and ordered most-trusted-
+    // first in `poolEndpoints.ts`. Endpoint health feeds the pool from
+    // `rpcObservability`'s terminal-state set via `getDeniedEndpointsForChain`
+    // (filter applied at compose time — see filter block above this fallback
+    // call once U5 lands; pre-U5 this comment is forward-looking).
+    //
+    // `observabilityHandle.register` below still uses `eth_blockNumber` as
+    // the probe method via `probeEndpoint`; that path is used by
+    // `forceProbeChain` (Retry button) and `scheduleAutoRecovery`, not by
+    // any per-call ranking.
     const fallbackTransport = fallback(wrappedTransports, {
-      rank: {
-        interval: 30_000,
-        sampleCount: 10,
-        timeout: 1500,
-        weights: { latency: 0.3, stability: 0.7 },
-        ping: ({ transport: pingTransport }) =>
-          pingTransport.request({ method: "eth_blockNumber" }),
-      },
       retryCount: 0,
       shouldThrow: shouldThrowFromFallback,
     });
