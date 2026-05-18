@@ -1,6 +1,11 @@
-import { useQueries, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import type { SnapshotProposal } from './useSnapshotProposal';
+
+const SNAPSHOT_GRAPHQL_URL = 'https://hub.snapshot.org/graphql';
+
+// Snapshot's GraphQL `first` cap is 1000; stay well below to keep payloads small.
+const BATCH_SIZE = 100;
 
 /**
  * Extract QIP number from proposal title
@@ -42,101 +47,112 @@ export interface QCIWithQIPNumber {
   snapshotProposalId: string | null;
 }
 
+// Snapshot returns IDs lowercased; the IDs we receive from QCI proposal URLs
+// may be any case. Normalize on both sides of the lookup to avoid mismatches.
+async function fetchProposalTitles(ids: string[]): Promise<Record<string, string>> {
+  const titleById: Record<string, string> = {};
+
+  for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+    const chunk = ids.slice(i, i + BATCH_SIZE);
+    const query = `
+      query Proposals($ids: [String]!) {
+        proposals(where: { id_in: $ids }, first: ${chunk.length}) {
+          id
+          title
+        }
+      }
+    `;
+
+    try {
+      const response = await fetch(SNAPSHOT_GRAPHQL_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, variables: { ids: chunk } }),
+      });
+
+      if (!response.ok) continue;
+
+      const data = await response.json();
+      if (data.errors) {
+        console.error('[useQIPNumbers] Snapshot GraphQL errors:', data.errors);
+        continue;
+      }
+
+      const proposals: Array<{ id?: string; title?: string }> = data.data?.proposals ?? [];
+      for (const p of proposals) {
+        if (p?.id && typeof p.title === 'string') {
+          titleById[p.id.toLowerCase()] = p.title;
+        }
+      }
+    } catch (error) {
+      console.error('[useQIPNumbers] Snapshot batch fetch failed:', error);
+    }
+  }
+
+  return titleById;
+}
+
 /**
- * Hook to efficiently fetch QIP numbers for multiple proposals
- * Uses React Query's useQueries to batch fetch in parallel
+ * Hook to efficiently fetch QIP numbers for multiple proposals.
+ *
+ * Issues a single batched Snapshot GraphQL query (chunked by BATCH_SIZE) for
+ * all proposal IDs instead of one request per proposal. Result is cached for
+ * 1h since QIP numbers don't change after a proposal is posted.
+ *
+ * If `useSnapshotProposal` has already populated the full proposal under
+ * ['snapshot','proposal', id] for any individual proposal, that data is
+ * preferred over the batched title-only result.
  */
 export function useQIPNumbers(proposals: Array<{ proposal?: string; qciNumber: number }>): Map<number, number | null> {
-  // Extract unique proposal URLs - memoize to prevent re-creating queries
   const proposalUrls = useMemo(() => {
     return proposals
       .filter(p => p.proposal && p.proposal !== 'None' && p.proposal !== 'TBU' && p.proposal !== 'none' && p.proposal !== 'tbu')
       .map(p => ({ url: p.proposal!, qciNumber: p.qciNumber }));
   }, [proposals]);
 
-  // Create a query for each proposal
-  const queries = useQueries({
-    queries: proposalUrls.map(({ url, qciNumber }) => {
-      const proposalId = extractProposalId(url);
+  // Sorted, deduped, lowercased list of proposal IDs to query. Sorting keeps
+  // the React Query queryKey stable across renders where the input order
+  // shifts.
+  const proposalIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const { url } of proposalUrls) {
+      const id = extractProposalId(url);
+      if (id) ids.add(id.toLowerCase());
+    }
+    return Array.from(ids).sort();
+  }, [proposalUrls]);
 
-      return {
-        queryKey: ['snapshot', 'proposal', proposalId],
-        queryFn: async () => {
-          if (!proposalId) {
-            return { qciNumber, qipNumber: null };
-          }
-
-          const query = `
-            query Proposal($id: String!) {
-              proposal(id: $id) {
-                id
-                title
-              }
-            }
-          `;
-
-          try {
-            const response = await fetch('https://hub.snapshot.org/graphql', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ query, variables: { id: proposalId } }),
-            });
-
-            if (!response.ok) {
-              return { qciNumber, qipNumber: null };
-            }
-
-            const data = await response.json();
-
-            if (data.errors) {
-              return { qciNumber, qipNumber: null };
-            }
-
-            const title = data.data?.proposal?.title;
-            const qipNumber = title ? extractQipNumber(title) : null;
-
-            return { qciNumber, qipNumber };
-          } catch (error) {
-            console.error(`Error fetching QIP number for QCI ${qciNumber}:`, error);
-            return { qciNumber, qipNumber: null };
-          }
-        },
-        staleTime: 1000 * 60 * 60, // 1 hour - QIP numbers don't change
-        gcTime: 1000 * 60 * 60 * 24, // 24 hours cache
-        enabled: !!proposalId,
-      };
-    }),
-  });
-
-  // Access query client to read existing cached data
   const queryClient = useQueryClient();
 
-  // Build a map of QCI number to QIP number
-  // Check both our queries AND the existing cache from useSnapshotProposal
+  // Single batched query for all titles. Result is a Record<id, title>.
+  const titlesQuery = useQuery<Record<string, string>>({
+    queryKey: ['snapshot', 'qip-titles', proposalIds],
+    queryFn: () => fetchProposalTitles(proposalIds),
+    enabled: proposalIds.length > 0,
+    staleTime: 1000 * 60 * 60, // 1 hour - QIP numbers don't change
+    gcTime: 1000 * 60 * 60 * 24, // 24 hours
+  });
+
   const qipNumberMap = useMemo(() => {
     const map = new Map<number, number | null>();
+    const batchedTitles = titlesQuery.data ?? {};
 
     proposalUrls.forEach(({ qciNumber, url }) => {
-      const proposalId = extractProposalId(url);
-      if (!proposalId) {
+      const rawId = extractProposalId(url);
+      if (!rawId) {
         map.set(qciNumber, null);
         return;
       }
 
-      // Check if data exists in cache (from ProposalListItem's useSnapshotProposal)
-      const cachedData = queryClient.getQueryData<SnapshotProposal>(['snapshot', 'proposal', proposalId]);
-
-      if (cachedData?.title) {
-        const qipNumber = extractQipNumber(cachedData.title);
-        map.set(qciNumber, qipNumber);
-      } else {
-        // Data not yet loaded, will remain null until queries complete
-        map.set(qciNumber, null);
-      }
+      // Prefer full proposal data from useSnapshotProposal cache when present;
+      // fall back to the batched titles map.
+      const full = queryClient.getQueryData<SnapshotProposal>(['snapshot', 'proposal', rawId]);
+      const title = full?.title ?? batchedTitles[rawId.toLowerCase()];
+      map.set(qciNumber, title ? extractQipNumber(title) : null);
     });
 
     return map;
-  }, [proposalUrls, queryClient, queries]);
+  }, [proposalUrls, queryClient, titlesQuery.data]);
 
   return qipNumberMap;
 }
