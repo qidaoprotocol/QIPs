@@ -351,6 +351,50 @@ export function buildChainTransport(
 }
 
 /**
+ * Returns a Transport whose underlying pool (and rank scheduler) is only
+ * constructed on the first `.request()` call. Use this for chains that are
+ * NOT touched on the initial page load (e.g. the user's wallet hasn't
+ * switched to them and no read path needs them yet).
+ *
+ * Why this matters on cold boot:
+ *   buildChainTransport composes `fallback({ rank: { interval: 30s, ... } })`,
+ *   and viem's fallback starts its rank probing as soon as the transport
+ *   factory is invoked (which wagmi does once per chain when it builds the
+ *   public client for each entry in `transports`). With 7 chains × ~6 pool
+ *   endpoints, that's ~40 `eth_blockNumber` probes flying within a second of
+ *   page load — pure waste for chains nothing on the page reads from.
+ *
+ * The synthetic `config` returned here exposes only metadata; the rank
+ * scheduler does not spin up until a caller actually performs an RPC.
+ */
+export function buildLazyChainTransport(chainId: number): Transport {
+  return (transportConfig) => {
+    let resolved: ReturnType<Transport> | null = null;
+    const ensure = (): ReturnType<Transport> => {
+      if (!resolved) {
+        resolved = buildChainTransport(chainId)(transportConfig);
+      }
+      return resolved;
+    };
+    const lazyRequest: ReturnType<Transport>["request"] = ((args: any, opts?: any) =>
+      ensure().request(args, opts)) as ReturnType<Transport>["request"];
+    return {
+      config: {
+        key: `lazy-${chainId}`,
+        name: `Lazy chain ${chainId}`,
+        type: "lazy",
+        retryCount: 0,
+        retryDelay: 150,
+        request: lazyRequest,
+        timeout: undefined,
+      } as unknown as ReturnType<Transport>["config"],
+      request: lazyRequest,
+      value: undefined,
+    };
+  };
+}
+
+/**
  * Reset the memoized transport cache. Test-only utility; production code MUST
  * NOT call this. Resetting between caller sessions would defeat the point of
  * memoization (rank-loop multiplication).

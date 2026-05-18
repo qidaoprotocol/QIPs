@@ -6,12 +6,12 @@ import { ConnectKitProvider } from "connectkit";
 import { arbitrum, base, baseSepolia, gnosis, mainnet, optimism, polygon } from "wagmi/chains";
 import { injected, walletConnect } from "wagmi/connectors";
 import { config, getChains, getDefaultChainId, localBaseFork } from "../config";
-import { createQueryClient, setupPersistentCache, clearQCICacheOnFreshLoad, CACHE_TIMES } from "../config/queryClient";
+import { createQueryClient, setupPersistentCache, CACHE_TIMES } from "../config/queryClient";
 import { useTheme } from "../providers/ThemeProvider";
 import { queryKeys } from "../utils/queryKeys";
 import { QCIClient } from "../services/qciClient";
 import { ALL_STATUS_NAMES, ALL_STATUS_HASHES } from "../config/statusConfig";
-import { buildChainTransport } from "../utils/rpcPools";
+import { buildChainTransport, buildLazyChainTransport } from "../utils/rpcPools";
 import { attachDebugGlobal } from "../utils/rpcObservability";
 import { RpcStatusBanner } from "../components/RpcStatusBanner";
 
@@ -26,15 +26,23 @@ const chains = getChains();
 // chain. The localBaseFork shim shares base.id, so passing
 // { rpcUrlOverride: config.baseRpcUrl } gives the local Anvil flow a single-
 // endpoint transport without the pool/observability overhead.
+//
+// Base is the QCI registry chain and is always touched on initial load, so it
+// uses the eager `buildChainTransport`. The other chains are only read when
+// the user's wallet switches to them or a multi-chain view needs them, so
+// they use `buildLazyChainTransport` to defer viem's fallback rank scheduler
+// until first use. Without lazy init these chains fire ~6 probe requests each
+// within a second of page load — ~40 wasted RPCs that contribute nothing to
+// the QCI list rendering.
 const transports = {
   [localBaseFork.id]: http(config.baseRpcUrl),
   [base.id]: buildChainTransport(base.id),
-  [baseSepolia.id]: buildChainTransport(baseSepolia.id),
-  [mainnet.id]: buildChainTransport(mainnet.id),
-  [optimism.id]: buildChainTransport(optimism.id),
-  [gnosis.id]: buildChainTransport(gnosis.id),
-  [polygon.id]: buildChainTransport(polygon.id),
-  [arbitrum.id]: buildChainTransport(arbitrum.id),
+  [baseSepolia.id]: buildLazyChainTransport(baseSepolia.id),
+  [mainnet.id]: buildLazyChainTransport(mainnet.id),
+  [optimism.id]: buildLazyChainTransport(optimism.id),
+  [gnosis.id]: buildLazyChainTransport(gnosis.id),
+  [polygon.id]: buildLazyChainTransport(polygon.id),
+  [arbitrum.id]: buildLazyChainTransport(arbitrum.id),
 };
 
 // Attach window.__qipsRpc in dev so console-level debugging works.
@@ -56,7 +64,6 @@ const wagmiConfig = createConfig({
 const queryClient = createQueryClient();
 
 if (typeof window !== "undefined") {
-  clearQCICacheOnFreshLoad();
   setupPersistentCache(queryClient);
 }
 
