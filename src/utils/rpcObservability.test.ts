@@ -65,8 +65,12 @@ describe("rpcObservability persistence", () => {
       registerBase();
       hydrate();
 
+      // `register()` pre-seeds the URL as state="unknown" to prevent the
+      // RpcStatusBanner false-positive on cold load. The TTL-gated hydrate
+      // is verified by the state staying at "unknown" rather than being
+      // restored to "cors-blocked", AND by the denied set being empty.
       const restored = getSnapshot()[base.id]?.[BASE_URL];
-      expect(restored).toBeUndefined();
+      expect(restored?.state).toBe("unknown");
       expect(getDeniedEndpointsForChain(base.id).size).toBe(0);
     });
 
@@ -94,7 +98,9 @@ describe("rpcObservability persistence", () => {
       registerBase();
       hydrate();
 
-      expect(getSnapshot()[base.id]?.[BASE_URL]).toBeUndefined();
+      // Pre-seeded by register() as "unknown" but NOT restored to "healthy"
+      // from the expired persisted blob.
+      expect(getSnapshot()[base.id]?.[BASE_URL]?.state).toBe("unknown");
     });
   });
 
@@ -116,7 +122,9 @@ describe("rpcObservability persistence", () => {
       registerBase();
       hydrate();
 
-      expect(getSnapshot()[base.id]?.[BASE_URL]).toBeUndefined();
+      // Pre-seeded as "unknown" by register() but NOT restored to the
+      // persisted "cors-blocked" because the pool hash didn't match.
+      expect(getSnapshot()[base.id]?.[BASE_URL]?.state).toBe("unknown");
       expect(window.localStorage.getItem(PERSIST_KEY)).toBeNull();
     });
   });
@@ -303,6 +311,55 @@ describe("rpcObservability persistence", () => {
       const restored = getSnapshot()[base.id]?.[BASE_URL];
       expect(restored?.state).toBe("auth-rejected");
       expect(restored?.hadOkSample).toBe(true);
+    });
+  });
+
+  describe("RpcStatusBanner false-positive guard", () => {
+    it("registration pre-seeds unknown entries for ALL registered endpoints (prevents banner flash on cold load with persisted health)", () => {
+      // Reproduce the cold-load scenario: hydrate seeds ONE URL as cors-blocked,
+      // then buildChainTransport calls observabilityHandle.register with the
+      // full pool. Banner's deriveExhaustedFromSnapshot would false-positive
+      // if the snapshot only contained the hydrated terminal entry.
+      const BAD_URL = BASE_URL;
+      const GOOD_URLS = ["https://base.drpc.org", "https://base-mainnet.public.blastapi.io"];
+
+      // Step 1: hydrate seeds the bad URL via the real persistence path.
+      observabilityHandle.register(base.id, {
+        endpoints: [BAD_URL],
+        probeEndpoint: vi.fn(async () => undefined),
+      });
+      recordCorsBlocked(base.id, BAD_URL, new TypeError("Failed to fetch"));
+      flushDehydrateForTests();
+      __resetForTests({ keepStorage: true });
+      hydrate();
+
+      // After hydrate: only the bad URL is in the snapshot.
+      const afterHydrate = getSnapshot()[base.id];
+      expect(Object.keys(afterHydrate ?? {})).toEqual([BAD_URL]);
+
+      // Step 2: buildChainTransport calls register with the FULL pool.
+      observabilityHandle.register(base.id, {
+        endpoints: [BAD_URL, ...GOOD_URLS],
+        probeEndpoint: vi.fn(async () => undefined),
+      });
+
+      // After register: the snapshot reflects the full pool, with the good
+      // URLs as state="unknown" — banner's deriveExhaustedFromSnapshot will
+      // skip them and NOT report the chain as exhausted.
+      const afterRegister = getSnapshot()[base.id] ?? {};
+      expect(afterRegister[BAD_URL]?.state).toBe("cors-blocked");
+      for (const url of GOOD_URLS) {
+        expect(afterRegister[url]?.state).toBe("unknown");
+      }
+
+      // Simulate the banner's logic: are there only non-healthy-non-unknown
+      // states? It should be FALSE because the good URLs are unknown.
+      const urls = Object.keys(afterRegister);
+      const allDown = urls.every((url) => {
+        const s = afterRegister[url].state;
+        return s !== "healthy" && s !== "unknown";
+      });
+      expect(allDown).toBe(false);
     });
   });
 
