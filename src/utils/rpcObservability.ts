@@ -429,6 +429,17 @@ export function getSnapshot(): Record<number, Record<string, EndpointHealth>> {
 export const observabilityHandle = {
   register(chainId: number, registration: ChainRegistration): void {
     state.registrations.set(chainId, registration);
+    // Pre-seed unknown entries for all registered endpoints so the snapshot
+    // reflects the full pool the moment registration completes. Without this,
+    // when hydrate() restores a terminal entry for one URL before any other
+    // URL has been touched, the snapshot has exactly one cors-blocked entry
+    // and `deriveExhaustedFromSnapshot` in RpcStatusBanner concludes "all
+    // known endpoints are dead → pool exhausted" — producing a banner flash
+    // on every cold load with persisted health. ensureEndpoint is idempotent
+    // so already-hydrated terminal entries are unchanged.
+    for (const url of registration.endpoints) {
+      ensureEndpoint(chainId, url);
+    }
   },
   snapshotAttempted(chainId: number): { url: string; state: EndpointState; status?: number; message?: string }[] {
     const chain = state.chains.get(chainId);
