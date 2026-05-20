@@ -2,14 +2,14 @@ import React, { useState } from "react";
 import { useEthersSigner } from "../utils/ethers";
 import { createProposal } from "../utils/snapshotClient";
 import { Proposal } from "@snapshot-labs/snapshot.js/dist/src/sign/types";
-import { ethers } from "ethers";
+import { usePublicClient } from "wagmi";
 import { useQuery } from "@tanstack/react-query";
 import { config } from "../config";
 import { Card, CardContent, CardFooter } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { AlertCircle, CheckCircle2, ExternalLink, Loader2 } from "lucide-react";
-import { base } from "wagmi/chains";
+import { base, mainnet } from "wagmi/chains";
 import { useLinkSnapshotProposal } from "../hooks/useLinkSnapshotProposal";
 import { getLatestQipNumber } from "../utils/snapshotClient";
 import { useQITokenBalance } from "../hooks/useQITokenBalance";
@@ -37,6 +37,10 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
   isEditor = false,
 }) => {
   const signer = useEthersSigner();
+  // Reuse the wagmi-managed mainnet client so we share its single ranked
+  // fallback pool / observability loop instead of spawning a new one per
+  // submission. The submit handler reads the current block from this client.
+  const mainnetClient = usePublicClient({ chainId: mainnet.id });
   const { ensureChain } = useEnsureChain(base.id);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<React.ReactNode>(null);
@@ -210,9 +214,13 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
         </div>
       );
       setStatusLevel("info");
-      // Always use Ethereum mainnet blocks for all Snapshot proposals
-      const ethProvider = new ethers.providers.JsonRpcProvider("https://eth.llamarpc.com");
-      const snapshotBlock = await ethProvider.getBlockNumber();
+      // Always use Ethereum mainnet blocks for all Snapshot proposals. Read
+      // through the wagmi-managed mainnet client so the call uses the
+      // configured pool/fallback transport instead of a hardcoded URL.
+      if (!mainnetClient) {
+        throw new Error("Mainnet public client unavailable — wagmi config missing mainnet transport.");
+      }
+      const snapshotBlock = Number(await mainnetClient.getBlockNumber());
 
       // Calculate timestamps right before submission
       const now = Math.floor(Date.now() / 1000);
