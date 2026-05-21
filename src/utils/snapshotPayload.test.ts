@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { formatProposalBody } from "./snapshotPayload";
 
-// Golden-fixture tests for the extracted formatProposalBody.
-// Per the PR-A plan: the extracted util must produce a byte-identical
-// Snapshot body string to the prior in-component implementation. These
-// fixtures exercise the same code paths used at submission time
-// (frontmatter rewriting, title stripping, transactions formatting).
+// Golden-fixture tests for the extracted formatProposalBody. The extracted
+// util must produce a byte-identical Snapshot body string to the prior
+// in-component implementation; these fixtures exercise the same code paths
+// used at submission time (frontmatter rewriting, title stripping,
+// transactions formatting).
 
 describe("formatProposalBody", () => {
   describe("happy path — small QCI, zero transactions", () => {
