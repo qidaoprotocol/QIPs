@@ -41,15 +41,17 @@ interface ProposalEditorProps {
 
 /**
  * Imperative handle exposed by SnapshotBodySection so the parent can read
- * the latest content at submit time, reset it after a successful save, and
- * (opt-in) subscribe to content changes while the rich preview block is
- * mounted — without re-rendering the parent on every keystroke.
+ * the latest content at submit time and reset it after a successful save —
+ * without re-rendering the parent on every keystroke. The handle object
+ * itself is stable across renders (created once); getContent reads from a
+ * ref that's synced after every render.
+ *
+ * Preview is now snapshot-on-click (see handlePreview in the parent), so
+ * no subscription API is exposed.
  */
 export interface SnapshotBodySectionHandle {
   getContent: () => string;
   setContent: (next: string) => void;
-  /** Subscribe to content changes. Returns an unsubscribe function. */
-  subscribe: (cb: (content: string) => void) => () => void;
 }
 
 interface SnapshotBodyFrontmatter {
@@ -184,6 +186,13 @@ const SnapshotBodySection = React.memo(
       ref
     ) {
       const [content, setContent] = useState(initialContent);
+      // Mirror of content held in a ref so the imperative handle can read
+      // the latest value without depending on `content` in its deps array.
+      // Without this, every keystroke would re-create the handle object,
+      // adding per-render allocation churn for no reader benefit.
+      const contentRef = useRef(content);
+      contentRef.current = content;
+
       // Debounced copy of content. The textarea binds to `content` for
       // snappy input; projection memos read `debouncedContent` so they
       // only run after typing has paused for COUNTER_DEBOUNCE_MS.
@@ -191,14 +200,6 @@ const SnapshotBodySection = React.memo(
       useEffect(() => {
         const t = setTimeout(() => setDebouncedContent(content), COUNTER_DEBOUNCE_MS);
         return () => clearTimeout(t);
-      }, [content]);
-
-      // Opt-in subscribers (e.g., the rich preview block) that want
-      // content updates without forcing the parent to re-render per
-      // keystroke. We notify them in an effect so React owns the timing.
-      const subscribersRef = useRef<Set<(content: string) => void>>(new Set());
-      useEffect(() => {
-        for (const cb of subscribersRef.current) cb(content);
       }, [content]);
 
       const projectedEmbeddedBody = useMemo(
@@ -231,16 +232,10 @@ const SnapshotBodySection = React.memo(
       useImperativeHandle(
         ref,
         () => ({
-          getContent: () => content,
+          getContent: () => contentRef.current,
           setContent,
-          subscribe: (cb) => {
-            subscribersRef.current.add(cb);
-            return () => {
-              subscribersRef.current.delete(cb);
-            };
-          },
         }),
-        [content]
+        []
       );
 
       return (
@@ -341,17 +336,6 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
   const [success, setSuccess] = useState<string | null>(null);
   const [preview, setPreview] = useState(false);
 
-  // Subscribe the preview block to body content changes ONLY while preview
-  // is open. This keeps typing fast in the default case (preview off, no
-  // parent re-renders per keystroke). When preview is on, the parent does
-  // re-render per keystroke so ReactMarkdown stays current — that's the
-  // acknowledged tradeoff and only happens when the user has explicitly
-  // opted into the slower preview view.
-  useEffect(() => {
-    if (!preview) return;
-    setPreviewContent(bodyRef.current?.getContent() ?? "");
-    return bodyRef.current?.subscribe(setPreviewContent);
-  }, [preview]);
   const [showTransactionModal, setShowTransactionModal] = useState(false);
   const [transactions, setTransactions] = useState<TransactionData[]>([]);
   const [editingTransactionIndex, setEditingTransactionIndex] = useState<number | null>(null);
@@ -398,10 +382,12 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
     setIsContentOverLimit(over);
   }, []);
 
-  // Live content mirror for the rich preview block ONLY. We subscribe to the
-  // body section's content updates while the preview is open, and unsubscribe
-  // when it closes. When preview is off, no subscription is active and
-  // typing in the textarea never re-renders this parent.
+  // Snapshot of the body content captured when Preview is toggled on. The
+  // preview is intentionally not live: typing with preview open would force
+  // ReactMarkdown to re-parse on every keystroke and force a parent
+  // re-render through the subscription, which dragged the whole editor
+  // through reconciliation per Codex's diagnosis. The user toggles Preview
+  // off, edits, then toggles Preview on again to see fresh output.
   const [previewContent, setPreviewContent] = useState("");
 
   const editorBodyLimit = config.snapshotBodyLimitDefault;
@@ -417,6 +403,30 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
     const withoutTxs = formatProposalBody("", editorFrontmatter, undefined);
     return withTxs.length - withoutTxs.length;
   }, [editorFrontmatter, serializedTxsForCounter]);
+
+  // Memoized JSON string for the transactions-preview <pre> block. Previously
+  // this ran groupTransactionsByMultisig → ABIParser.formatTransaction →
+  // JSON.parse → JSON.stringify inside the render function, allocating heavily
+  // on every parent re-render. Codex flagged this as a second-order GC
+  // pressure source. Now it computes once when transactions change.
+  const transactionsPreviewJSON = useMemo(() => {
+    if (transactions.length === 0) return null;
+    return JSON.stringify(
+      groupTransactionsByMultisig(transactions).map(group => ({
+        multisig: group.multisig,
+        transactions: group.transactions.map((tx) => {
+          const formatted = ABIParser.formatTransaction(tx);
+          try {
+            return JSON.parse(formatted);
+          } catch {
+            return formatted;
+          }
+        }),
+      })),
+      null,
+      2
+    );
+  }, [transactions]);
 
   // Initialize transactions from existing QCI content
   useEffect(() => {
@@ -603,6 +613,14 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
   );
 
   const handlePreview = () => {
+    if (!preview) {
+      // Toggling preview ON — snapshot the current body content right now.
+      // The preview block reads `previewContent`, not a live subscription,
+      // so editing doesn't cascade into ReactMarkdown re-parses while
+      // preview is open. To see fresh content, the user toggles back to
+      // Edit, makes changes, and re-opens Preview.
+      setPreviewContent(bodyRef.current?.getContent() ?? "");
+    }
     setPreview(!preview);
   };
 
@@ -786,24 +804,7 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
               <div className="mt-8 pt-6 border-t border-border">
                 <h2 className="text-xl font-bold mb-4">Transactions</h2>
                 <pre className="bg-muted/50 p-4 rounded-lg overflow-x-auto">
-                  <code className="text-sm font-mono">
-                    {JSON.stringify(
-                      // Group transactions by multisig for preview
-                      groupTransactionsByMultisig(transactions).map(group => ({
-                        multisig: group.multisig,
-                        transactions: group.transactions.map((tx) => {
-                          const formatted = ABIParser.formatTransaction(tx);
-                          try {
-                            return JSON.parse(formatted);
-                          } catch {
-                            return formatted;
-                          }
-                        }),
-                      })),
-                      null,
-                      2
-                    )}
-                  </code>
+                  <code className="text-sm font-mono">{transactionsPreviewJSON}</code>
                 </pre>
               </div>
             )}
