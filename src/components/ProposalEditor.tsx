@@ -19,16 +19,11 @@ import { TransactionGroup } from "./TransactionGroup";
 import { type TransactionData, ABIParser } from "../utils/abiParser";
 import { groupTransactionsByMultisig, serializeTransactionsForBody } from "../utils/transactionParser";
 import { formatProposalBody } from "../utils/snapshotPayload";
+import { SNAPSHOT_BODY_WARNING_RATIO } from "@/config/env";
 import { Plus } from "lucide-react";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getAllChainNames } from '@/config/proposalChains';
-
-// Warning threshold for the advisory counter — render amber at 80% of the
-// limit, destructive (red) above the limit. Matches CommentComposer's
-// canonical pattern. Editor doesn't enforce; the hard gate lives in the
-// submitter. Tooltip on the counter explains the advisory nature.
-const EDITOR_BODY_WARNING_RATIO = 0.8;
 
 interface ProposalEditorProps {
   registryAddress: Address;
@@ -106,34 +101,34 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
   const createQCIMutation = useCreateQCI({ registryAddress });
   const updateQCIMutation = useUpdateQCI({ registryAddress });
 
-  // Advisory projection of the Snapshot body the user is composing. Routes
-  // through the same shared serializer (formatProposalBody +
-  // serializeTransactionsForBody) the submitter uses at signature time —
-  // single shared serializer, no parallel size-accounting path. R3 calls
-  // for this counter as an early-feedback signal; the hard gate lives in
-  // SnapshotSubmitter so editing doesn't get blocked on a QCI save (which
-  // writes to IPFS + registry, neither of which has the Snapshot limit).
+  // Advisory Snapshot-body projection — same shared serializer the submitter
+  // uses at signature time. The hard gate lives in SnapshotSubmitter; this
+  // counter is informational so editing isn't blocked on a QCI save.
   //
-  // Pessimistic in two small ways: when implementor / implementation-date
-  // are unset, we emit "None" so the frontmatter row is omitted (matching
-  // the submitter's behavior); and we fall back to today's date for
-  // created if no existing QCI is loaded.
+  // Split into two memos so the per-keystroke `content` change doesn't
+  // re-run the transaction serialization (which round-trips through
+  // ABIParser per tx).
+  const serializedTxsForCounter = useMemo(
+    () => serializeTransactionsForBody(transactions),
+    [transactions]
+  );
+  const existingImplementationDate = existingQCI?.content["implementation-date"];
+  const existingCreated = existingQCI?.content.created;
   const projectedEmbeddedBody = useMemo(() => {
     const frontmatter = {
       chain: combooxSelectedChain,
       author: author || "",
       implementor,
-      "implementation-date": existingQCI?.content["implementation-date"] || "None",
-      created: existingQCI?.content.created || new Date().toISOString().split("T")[0],
+      "implementation-date": existingImplementationDate || "None",
+      created: existingCreated || new Date().toISOString().split("T")[0],
     };
-    const serializedTxs = serializeTransactionsForBody(transactions);
-    return formatProposalBody(content, frontmatter, serializedTxs);
-  }, [content, combooxSelectedChain, author, implementor, existingQCI, transactions]);
+    return formatProposalBody(content, frontmatter, serializedTxsForCounter);
+  }, [content, combooxSelectedChain, author, implementor, existingImplementationDate, existingCreated, serializedTxsForCounter]);
   const editorBodyLength = projectedEmbeddedBody.length;
   const editorBodyLimit = config.snapshotBodyLimitDefault;
   const editorOverLimit = editorBodyLength > editorBodyLimit;
   const editorNearLimit =
-    !editorOverLimit && editorBodyLength >= Math.floor(editorBodyLimit * EDITOR_BODY_WARNING_RATIO);
+    !editorOverLimit && editorBodyLength >= Math.floor(editorBodyLimit * SNAPSHOT_BODY_WARNING_RATIO);
 
   // Initialize transactions from existing QCI content
   useEffect(() => {
@@ -428,26 +423,20 @@ Why this proposal is needed...
 
 Implementation details...`}
           />
-          {/* Advisory Snapshot-body counter — informational only, no gating.
-              Routes through the same shared serializer the submitter uses;
-              tooltip clarifies that the authoritative check happens at
-              Snapshot submission. */}
-          <div className="flex items-center justify-end text-xs">
-            <span
-              className={
-                editorOverLimit
-                  ? "text-destructive"
-                  : editorNearLimit
-                  ? "text-amber-600 dark:text-amber-400"
-                  : "text-muted-foreground"
-              }
-              aria-live="polite"
-              title="Advisory projection — final count is checked at Snapshot submit."
-            >
-              Snapshot body: {editorBodyLength.toLocaleString()} / {editorBodyLimit.toLocaleString()} chars
-              {editorOverLimit && " — over Snapshot limit"}
-            </span>
-          </div>
+          <span
+            className={`block text-right text-xs ${
+              editorOverLimit
+                ? "text-destructive"
+                : editorNearLimit
+                ? "text-amber-600 dark:text-amber-400"
+                : "text-muted-foreground"
+            }`}
+            aria-live="polite"
+            title="Advisory projection — final count is checked at Snapshot submit."
+          >
+            Snapshot body: {editorBodyLength.toLocaleString()} / {editorBodyLimit.toLocaleString()} chars
+            {editorOverLimit && " — over Snapshot limit"}
+          </span>
         </div>
 
         {/* Transactions Section */}

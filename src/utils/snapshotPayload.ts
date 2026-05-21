@@ -1,15 +1,8 @@
 /**
- * Shared serializer for the Snapshot proposal `body` field.
- *
- * Single source of truth for both the wire payload (used by `SnapshotSubmitter`
- * at submission time) and the live character counter (used by the editor and
- * submitter UIs). Counter and gate call sites measure `formatProposalBody(...).length`
- * directly — `.length` (UTF-16 code units) is what the Snapshot Sequencer
- * itself checks (`msg.payload.body.length`), so this matches the server.
- *
- * Do NOT count UTF-8 bytes here. The comments backend in mai-api gates on
- * bytes (see `CommentComposer.tsx`), but Snapshot gates on `.length` —
- * this is a deliberate per-backend divergence.
+ * Counter and gate call sites measure `.length` (UTF-16 code units) — what
+ * the Snapshot Sequencer itself checks (`msg.payload.body.length`). Do NOT
+ * swap to UTF-8 bytes; the comments backend (`CommentComposer.tsx`) gates on
+ * bytes but Snapshot doesn't, and a per-backend divergence is intentional.
  */
 export function formatProposalBody(
   rawMarkdown: string,

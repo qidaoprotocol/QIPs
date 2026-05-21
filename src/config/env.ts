@@ -72,13 +72,10 @@ export const config = {
   snapshotTestMode: getBoolEnvVar("VITE_SNAPSHOT_TEST_MODE", false),
   snapshotTestSpace: getEnvVar("VITE_SNAPSHOT_TEST_SPACE", "testdevtest.eth"),
 
-  // Snapshot proposal-body character limit. Mirrors the bucketed limit the
-  // Snapshot Sequencer enforces server-side
-  // (snapshot-labs/sx-monorepo/apps/sequencer/src/writer/proposal.ts:260-264).
-  // Counted as JavaScript string.length (UTF-16 code units), NOT UTF-8 bytes.
-  // Default bucket (verified/default/flagged spaces, including qidao.eth) =
-  // 10000; turbo (Snapshot Pro) spaces = 50000 per live DB. Override via env
-  // var if Snapshot bumps the limits before this client is redeployed.
+  // Snapshot proposal-body character limit. Counted as `.length` (UTF-16
+  // code units) to match the Sequencer's own check, NOT UTF-8 bytes —
+  // unlike `qipCommentsBodyMaxBytes` above which gates on bytes because
+  // the comments backend does. The default bucket covers qidao.eth.
   snapshotBodyLimitDefault: parseInt(getEnvVar("VITE_SNAPSHOT_BODY_LIMIT_DEFAULT", "10000"), 10) || 10000,
   snapshotBodyLimitTurbo: parseInt(getEnvVar("VITE_SNAPSHOT_BODY_LIMIT_TURBO", "50000"), 10) || 50000,
 
@@ -87,22 +84,11 @@ export const config = {
   isProduction: process.env.NODE_ENV === "production",
 };
 
-/**
- * Snapshot space-type bucket. Mirrors how the Sequencer keys its body-limit
- * options in MySQL: `space.{default,verified,flagged,turbo}.body_limit`. Default,
- * verified, and flagged all map to the same default limit; turbo is the higher
- * Snapshot Pro tier. U7 (deferred) will hydrate this from the live Settings
- * query; until then the active call site passes "verified" as the literal type
- * for qidao.eth (verified live: space(id: "qidao.eth").verified == true).
- */
-export type SnapshotSpaceType = "default" | "verified" | "flagged" | "turbo";
-
-export const getSnapshotBodyLimit = (spaceType: SnapshotSpaceType): number => {
-  if (spaceType === "turbo") {
-    return config.snapshotBodyLimitTurbo;
-  }
-  return config.snapshotBodyLimitDefault;
-};
+// Warning threshold for the live Snapshot-body counter — render amber at
+// 80% of the configured limit, destructive above it. Shared between the
+// authoritative counter in SnapshotSubmitter and the advisory counter in
+// ProposalEditor so the boundary stays consistent.
+export const SNAPSHOT_BODY_WARNING_RATIO = 0.8;
 
 // Validation
 export const validateConfig = () => {
