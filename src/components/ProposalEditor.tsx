@@ -14,13 +14,14 @@ import { Label } from '@/components/ui/label';
 import { ChainCombobox } from "./ChainCombobox";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { TransactionFormatter } from "./TransactionFormatter";
 import { TransactionGroup } from "./TransactionGroup";
 import { type TransactionData, ABIParser } from "../utils/abiParser";
 import { groupTransactionsByMultisig, serializeTransactionsForBody } from "../utils/transactionParser";
 import { formatProposalBody } from "../utils/snapshotPayload";
 import { SNAPSHOT_BODY_WARNING_RATIO } from "@/config/env";
-import { Plus } from "lucide-react";
+import { Info, Plus } from "lucide-react";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getAllChainNames } from '@/config/proposalChains';
@@ -137,7 +138,17 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
     () => formatProposalBody(content, editorFrontmatter, undefined),
     [content, editorFrontmatter]
   );
+  // Empty-content baseline so we can attribute the YAML-frontmatter overhead
+  // separately in the breakdown tooltip. formatProposalBody is additive
+  // (frontmatter + "\n\n" + content + tx-block), so the three deltas sum to
+  // the total body length.
+  const projectedBodyFrontmatterOnly = useMemo(
+    () => formatProposalBody("", editorFrontmatter, undefined),
+    [editorFrontmatter]
+  );
   const editorBodyLength = projectedEmbeddedBody.length;
+  const frontmatterChars = projectedBodyFrontmatterOnly.length;
+  const contentChars = projectedBodyWithoutTxs.length - projectedBodyFrontmatterOnly.length;
   const txCharContribution = projectedEmbeddedBody.length - projectedBodyWithoutTxs.length;
   const editorBodyLimit = config.snapshotBodyLimitDefault;
   const editorOverLimit = editorBodyLength > editorBodyLimit;
@@ -448,20 +459,59 @@ Why this proposal is needed...
 
 Implementation details...`}
           />
-          <span
-            className={`block text-right text-xs ${
-              editorOverLimit
-                ? "text-destructive"
-                : editorNearLimit
-                ? "text-amber-600 dark:text-amber-400"
-                : "text-muted-foreground"
-            }`}
-            aria-live="polite"
-            title="Advisory projection — final count is checked at Snapshot submit."
-          >
-            Snapshot body: {editorBodyLength.toLocaleString()} / {editorBodyLimit.toLocaleString()} chars
-            {editorOverLimit && " — over Snapshot limit"}
-          </span>
+          <div className="flex items-center justify-end gap-1.5">
+            <span
+              className={`text-xs ${
+                editorOverLimit
+                  ? "text-destructive"
+                  : editorNearLimit
+                  ? "text-amber-600 dark:text-amber-400"
+                  : "text-muted-foreground"
+              }`}
+              aria-live="polite"
+              title="Advisory projection — final count is checked at Snapshot submit."
+            >
+              Snapshot body: {editorBodyLength.toLocaleString()} / {editorBodyLimit.toLocaleString()} chars
+              {editorOverLimit && " — over Snapshot limit"}
+            </span>
+            <TooltipProvider delayDuration={150}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Snapshot body character breakdown"
+                    className="text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <Info className="h-3.5 w-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" align="end" className="max-w-xs">
+                  <div className="space-y-1.5">
+                    <div className="font-semibold">Snapshot body breakdown</div>
+                    <div className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-0.5 text-xs">
+                      <span>YAML frontmatter</span>
+                      <span className="text-right tabular-nums">{frontmatterChars.toLocaleString()}</span>
+                      <span>Proposal content</span>
+                      <span className="text-right tabular-nums">{contentChars.toLocaleString()}</span>
+                      {txCharContribution > 0 && (
+                        <>
+                          <span>Transactions block</span>
+                          <span className="text-right tabular-nums">{txCharContribution.toLocaleString()}</span>
+                        </>
+                      )}
+                      <span className="border-t border-primary-foreground/20 pt-0.5 font-medium">Total</span>
+                      <span className="border-t border-primary-foreground/20 pt-0.5 text-right font-medium tabular-nums">
+                        {editorBodyLength.toLocaleString()} / {editorBodyLimit.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="pt-1 text-[10px] opacity-80">
+                      Frontmatter and transactions are emitted by the Snapshot serializer in addition to your markdown content. Advisory projection — the submitter does the final check.
+                    </div>
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
         </div>
 
         {/* Transactions Section */}
