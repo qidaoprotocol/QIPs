@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo, useDeferredValue, useImperativeHandle } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo, useImperativeHandle } from 'react';
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAccount, useWalletClient, useSwitchChain } from 'wagmi';
@@ -68,17 +68,114 @@ interface SnapshotBodySectionProps {
   onOverLimitChange: (over: boolean) => void;
 }
 
+// How long the projection waits after the last keystroke before recomputing.
+// 250ms is long enough to skip every intermediate keystroke during a paste
+// burst but short enough that the counter "feels live" once typing pauses.
+const COUNTER_DEBOUNCE_MS = 250;
+
+interface BodyMeterProps {
+  bodyLength: number;
+  bodyLimit: number;
+  frontmatterChars: number;
+  contentCharsValue: number;
+  txCharContribution: number;
+  overLimit: boolean;
+  nearLimit: boolean;
+}
+
 /**
- * Owns the textarea state, the live char counter, the breakdown tooltip, and
- * the optional ReactMarkdown preview — everything that depends on `content`.
+ * Counter + breakdown tooltip subtree. Wrapped in React.memo so it doesn't
+ * re-reconcile on every textarea keystroke — Radix's TooltipProvider tree
+ * contains ~180 internal Primitive.div / SlotClone wrappers per React Scan,
+ * and re-rendering all of them per keystroke was a big chunk of the cost.
+ * Now this subtree only re-renders when its derived props change, which is
+ * only when the debounced projection catches up (every COUNTER_DEBOUNCE_MS
+ * idle period).
+ */
+const BodyMeter = React.memo(function BodyMeter({
+  bodyLength,
+  bodyLimit,
+  frontmatterChars,
+  contentCharsValue,
+  txCharContribution,
+  overLimit,
+  nearLimit,
+}: BodyMeterProps) {
+  return (
+    <div className="flex items-center justify-end gap-1.5">
+      <span
+        className={`text-xs ${
+          overLimit
+            ? "text-destructive"
+            : nearLimit
+            ? "text-amber-600 dark:text-amber-400"
+            : "text-muted-foreground"
+        }`}
+        aria-live="polite"
+        title="Advisory projection — final count is checked at Snapshot submit."
+      >
+        Snapshot body: {bodyLength.toLocaleString()} / {bodyLimit.toLocaleString()} chars
+        {overLimit && " — over Snapshot limit"}
+      </span>
+      <TooltipProvider delayDuration={150}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label="Snapshot body character breakdown"
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Info className="h-3.5 w-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" align="end" className="max-w-xs">
+            <div className="space-y-1.5">
+              <div className="font-semibold">Snapshot body breakdown</div>
+              <div className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-0.5 text-xs">
+                <span>YAML frontmatter</span>
+                <span className="text-right tabular-nums">{frontmatterChars.toLocaleString()}</span>
+                <span>Proposal content</span>
+                <span className="text-right tabular-nums">{contentCharsValue.toLocaleString()}</span>
+                {txCharContribution > 0 && (
+                  <>
+                    <span>Transactions block</span>
+                    <span className="text-right tabular-nums">{txCharContribution.toLocaleString()}</span>
+                  </>
+                )}
+                <span className="border-t border-primary-foreground/20 pt-0.5 font-medium">Total</span>
+                <span className="border-t border-primary-foreground/20 pt-0.5 text-right font-medium tabular-nums">
+                  {bodyLength.toLocaleString()} / {bodyLimit.toLocaleString()}
+                </span>
+              </div>
+              <div className="pt-1 text-[10px] opacity-80">
+                Frontmatter and transactions are emitted by the Snapshot serializer in addition to your markdown content. Advisory projection — the submitter does the final check.
+              </div>
+            </div>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    </div>
+  );
+});
+
+/**
+ * Owns the textarea state, the live char counter, and the breakdown tooltip.
  * Wrapped in React.memo + ref so per-keystroke updates stay isolated to this
  * subtree and don't drag the parent ProposalEditor's other children
  * (ChainCombobox, Transactions section, TransactionFormatter modal, the
  * Radix slot primitives) through reconciliation.
  *
- * The parent reads content via `ref.current.getContent()` at submit time and
- * pushes content back via `ref.current.setContent()` when an existing QCI's
- * data loads asynchronously.
+ * The projection memos read a setTimeout-debounced copy of content so they
+ * don't run on every keystroke — useDeferredValue alone wasn't enough
+ * because it still committed the deferred render at low priority, and the
+ * Radix Tooltip subtree underneath the counter has enough internal wrappers
+ * that even a fast re-reconcile per keystroke costs noticeable ms in dev.
+ * The BodyMeter subcomponent is React.memo so it skips re-render entirely
+ * unless its derived props change.
+ *
+ * The parent reads content via `ref.current.getContent()` at submit time
+ * and pushes content back via `ref.current.setContent()` when an existing
+ * QCI's data loads asynchronously.
  */
 const SnapshotBodySection = React.memo(
   React.forwardRef<SnapshotBodySectionHandle, SnapshotBodySectionProps>(
@@ -87,7 +184,15 @@ const SnapshotBodySection = React.memo(
       ref
     ) {
       const [content, setContent] = useState(initialContent);
-      const deferredContent = useDeferredValue(content);
+      // Debounced copy of content. The textarea binds to `content` for
+      // snappy input; projection memos read `debouncedContent` so they
+      // only run after typing has paused for COUNTER_DEBOUNCE_MS.
+      const [debouncedContent, setDebouncedContent] = useState(initialContent);
+      useEffect(() => {
+        const t = setTimeout(() => setDebouncedContent(content), COUNTER_DEBOUNCE_MS);
+        return () => clearTimeout(t);
+      }, [content]);
+
       // Opt-in subscribers (e.g., the rich preview block) that want
       // content updates without forcing the parent to re-render per
       // keystroke. We notify them in an effect so React owns the timing.
@@ -97,12 +202,12 @@ const SnapshotBodySection = React.memo(
       }, [content]);
 
       const projectedEmbeddedBody = useMemo(
-        () => formatProposalBody(deferredContent, frontmatter, serializedTxs),
-        [deferredContent, frontmatter, serializedTxs]
+        () => formatProposalBody(debouncedContent, frontmatter, serializedTxs),
+        [debouncedContent, frontmatter, serializedTxs]
       );
       const projectedBodyWithoutTxs = useMemo(
-        () => formatProposalBody(deferredContent, frontmatter, undefined),
-        [deferredContent, frontmatter]
+        () => formatProposalBody(debouncedContent, frontmatter, undefined),
+        [debouncedContent, frontmatter]
       );
       const projectedBodyFrontmatterOnly = useMemo(
         () => formatProposalBody("", frontmatter, undefined),
@@ -139,17 +244,16 @@ const SnapshotBodySection = React.memo(
       );
 
       return (
-        <>
-          <div className="space-y-2">
-            <Label htmlFor="content">Proposal Content (Markdown) *</Label>
-            <Textarea
-              id="content"
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              required
-              rows={20}
-              className="font-mono text-sm"
-              placeholder={`## Summary
+        <div className="space-y-2">
+          <Label htmlFor="content">Proposal Content (Markdown) *</Label>
+          <Textarea
+            id="content"
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            required
+            rows={20}
+            className="font-mono text-sm"
+            placeholder={`## Summary
 
 Brief overview of your proposal...
 
@@ -164,62 +268,17 @@ Why this proposal is needed...
 ## Technical Specification
 
 Implementation details...`}
-            />
-            <div className="flex items-center justify-end gap-1.5">
-              <span
-                className={`text-xs ${
-                  overLimit
-                    ? "text-destructive"
-                    : nearLimit
-                    ? "text-amber-600 dark:text-amber-400"
-                    : "text-muted-foreground"
-                }`}
-                aria-live="polite"
-                title="Advisory projection — final count is checked at Snapshot submit."
-              >
-                Snapshot body: {editorBodyLength.toLocaleString()} / {bodyLimit.toLocaleString()} chars
-                {overLimit && " — over Snapshot limit"}
-              </span>
-              <TooltipProvider delayDuration={150}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      aria-label="Snapshot body character breakdown"
-                      className="text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      <Info className="h-3.5 w-3.5" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" align="end" className="max-w-xs">
-                    <div className="space-y-1.5">
-                      <div className="font-semibold">Snapshot body breakdown</div>
-                      <div className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-0.5 text-xs">
-                        <span>YAML frontmatter</span>
-                        <span className="text-right tabular-nums">{frontmatterChars.toLocaleString()}</span>
-                        <span>Proposal content</span>
-                        <span className="text-right tabular-nums">{contentCharsValue.toLocaleString()}</span>
-                        {txCharContribution > 0 && (
-                          <>
-                            <span>Transactions block</span>
-                            <span className="text-right tabular-nums">{txCharContribution.toLocaleString()}</span>
-                          </>
-                        )}
-                        <span className="border-t border-primary-foreground/20 pt-0.5 font-medium">Total</span>
-                        <span className="border-t border-primary-foreground/20 pt-0.5 text-right font-medium tabular-nums">
-                          {editorBodyLength.toLocaleString()} / {bodyLimit.toLocaleString()}
-                        </span>
-                      </div>
-                      <div className="pt-1 text-[10px] opacity-80">
-                        Frontmatter and transactions are emitted by the Snapshot serializer in addition to your markdown content. Advisory projection — the submitter does the final check.
-                      </div>
-                    </div>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </div>
-          </div>
-        </>
+          />
+          <BodyMeter
+            bodyLength={editorBodyLength}
+            bodyLimit={bodyLimit}
+            frontmatterChars={frontmatterChars}
+            contentCharsValue={contentCharsValue}
+            txCharContribution={txCharContribution}
+            overLimit={overLimit}
+            nearLimit={nearLimit}
+          />
+        </div>
       );
     }
   )
@@ -439,7 +498,7 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
       // A QCI saved over the Snapshot body limit can never be submitted to
       // Snapshot — block save here so we don't write wasted content to IPFS
       // + the registry. Read the URGENT content via the body section's ref
-      // (the child's display counter uses useDeferredValue and can lag); a
+      // (the child's display counter is debounced and lags up to ~250ms); a
       // fast typist who clicks Save during that lag must still get gated.
       const content = bodyRef.current?.getContent() ?? "";
       const freshBody = formatProposalBody(content, editorFrontmatter, serializedTxsForCounter);
