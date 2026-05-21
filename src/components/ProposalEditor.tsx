@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo, useDeferredValue } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo, useDeferredValue, useImperativeHandle } from 'react';
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAccount, useWalletClient, useSwitchChain } from 'wagmi';
@@ -38,6 +38,193 @@ interface ProposalEditorProps {
   initialContent?: string;
   initialImplementor?: string;
 }
+
+/**
+ * Imperative handle exposed by SnapshotBodySection so the parent can read
+ * the latest content at submit time, reset it after a successful save, and
+ * (opt-in) subscribe to content changes while the rich preview block is
+ * mounted — without re-rendering the parent on every keystroke.
+ */
+export interface SnapshotBodySectionHandle {
+  getContent: () => string;
+  setContent: (next: string) => void;
+  /** Subscribe to content changes. Returns an unsubscribe function. */
+  subscribe: (cb: (content: string) => void) => () => void;
+}
+
+interface SnapshotBodyFrontmatter {
+  chain: string;
+  author: string;
+  implementor: string;
+  "implementation-date": string;
+  created: string;
+}
+
+interface SnapshotBodySectionProps {
+  initialContent: string;
+  frontmatter: SnapshotBodyFrontmatter;
+  serializedTxs: string | undefined;
+  bodyLimit: number;
+  onOverLimitChange: (over: boolean) => void;
+}
+
+/**
+ * Owns the textarea state, the live char counter, the breakdown tooltip, and
+ * the optional ReactMarkdown preview — everything that depends on `content`.
+ * Wrapped in React.memo + ref so per-keystroke updates stay isolated to this
+ * subtree and don't drag the parent ProposalEditor's other children
+ * (ChainCombobox, Transactions section, TransactionFormatter modal, the
+ * Radix slot primitives) through reconciliation.
+ *
+ * The parent reads content via `ref.current.getContent()` at submit time and
+ * pushes content back via `ref.current.setContent()` when an existing QCI's
+ * data loads asynchronously.
+ */
+const SnapshotBodySection = React.memo(
+  React.forwardRef<SnapshotBodySectionHandle, SnapshotBodySectionProps>(
+    function SnapshotBodySection(
+      { initialContent, frontmatter, serializedTxs, bodyLimit, onOverLimitChange },
+      ref
+    ) {
+      const [content, setContent] = useState(initialContent);
+      const deferredContent = useDeferredValue(content);
+      // Opt-in subscribers (e.g., the rich preview block) that want
+      // content updates without forcing the parent to re-render per
+      // keystroke. We notify them in an effect so React owns the timing.
+      const subscribersRef = useRef<Set<(content: string) => void>>(new Set());
+      useEffect(() => {
+        for (const cb of subscribersRef.current) cb(content);
+      }, [content]);
+
+      const projectedEmbeddedBody = useMemo(
+        () => formatProposalBody(deferredContent, frontmatter, serializedTxs),
+        [deferredContent, frontmatter, serializedTxs]
+      );
+      const projectedBodyWithoutTxs = useMemo(
+        () => formatProposalBody(deferredContent, frontmatter, undefined),
+        [deferredContent, frontmatter]
+      );
+      const projectedBodyFrontmatterOnly = useMemo(
+        () => formatProposalBody("", frontmatter, undefined),
+        [frontmatter]
+      );
+
+      const editorBodyLength = projectedEmbeddedBody.length;
+      const frontmatterChars = projectedBodyFrontmatterOnly.length;
+      const contentCharsValue = projectedBodyWithoutTxs.length - projectedBodyFrontmatterOnly.length;
+      const txCharContribution = projectedEmbeddedBody.length - projectedBodyWithoutTxs.length;
+      const overLimit = editorBodyLength > bodyLimit;
+      const nearLimit = !overLimit && editorBodyLength >= Math.floor(bodyLimit * SNAPSHOT_BODY_WARNING_RATIO);
+
+      // Notify the parent only when the over-limit flag actually flips, so
+      // the parent's Update/Create button can disable without subscribing
+      // to every keystroke.
+      useEffect(() => {
+        onOverLimitChange(overLimit);
+      }, [overLimit, onOverLimitChange]);
+
+      useImperativeHandle(
+        ref,
+        () => ({
+          getContent: () => content,
+          setContent,
+          subscribe: (cb) => {
+            subscribersRef.current.add(cb);
+            return () => {
+              subscribersRef.current.delete(cb);
+            };
+          },
+        }),
+        [content]
+      );
+
+      return (
+        <>
+          <div className="space-y-2">
+            <Label htmlFor="content">Proposal Content (Markdown) *</Label>
+            <Textarea
+              id="content"
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              required
+              rows={20}
+              className="font-mono text-sm"
+              placeholder={`## Summary
+
+Brief overview of your proposal...
+
+## Abstract
+
+Detailed explanation...
+
+## Rationale
+
+Why this proposal is needed...
+
+## Technical Specification
+
+Implementation details...`}
+            />
+            <div className="flex items-center justify-end gap-1.5">
+              <span
+                className={`text-xs ${
+                  overLimit
+                    ? "text-destructive"
+                    : nearLimit
+                    ? "text-amber-600 dark:text-amber-400"
+                    : "text-muted-foreground"
+                }`}
+                aria-live="polite"
+                title="Advisory projection — final count is checked at Snapshot submit."
+              >
+                Snapshot body: {editorBodyLength.toLocaleString()} / {bodyLimit.toLocaleString()} chars
+                {overLimit && " — over Snapshot limit"}
+              </span>
+              <TooltipProvider delayDuration={150}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="Snapshot body character breakdown"
+                      className="text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <Info className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" align="end" className="max-w-xs">
+                    <div className="space-y-1.5">
+                      <div className="font-semibold">Snapshot body breakdown</div>
+                      <div className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-0.5 text-xs">
+                        <span>YAML frontmatter</span>
+                        <span className="text-right tabular-nums">{frontmatterChars.toLocaleString()}</span>
+                        <span>Proposal content</span>
+                        <span className="text-right tabular-nums">{contentCharsValue.toLocaleString()}</span>
+                        {txCharContribution > 0 && (
+                          <>
+                            <span>Transactions block</span>
+                            <span className="text-right tabular-nums">{txCharContribution.toLocaleString()}</span>
+                          </>
+                        )}
+                        <span className="border-t border-primary-foreground/20 pt-0.5 font-medium">Total</span>
+                        <span className="border-t border-primary-foreground/20 pt-0.5 text-right font-medium tabular-nums">
+                          {editorBodyLength.toLocaleString()} / {bodyLimit.toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="pt-1 text-[10px] opacity-80">
+                        Frontmatter and transactions are emitted by the Snapshot serializer in addition to your markdown content. Advisory projection — the submitter does the final check.
+                      </div>
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+          </div>
+        </>
+      );
+    }
+  )
+);
+SnapshotBodySection.displayName = "SnapshotBodySection";
 
 export const ProposalEditor: React.FC<ProposalEditorProps> = ({
   registryAddress,
@@ -79,11 +266,13 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
   const [combooxSelectedChain, setComboboxSelectedChain] = useState(
     existingQCI?.content.chain || importedData?.chain || initialChain || "Polygon PoS"
   );
-  const [content, setContent] = useState(
-    existingQCI?.content.content
-      ? getContentWithoutTransactions(existingQCI.content.content)
-      : importedData?.content || initialContent || ""
-  );
+  // Initial value passed into SnapshotBodySection on mount. The child owns
+  // the live content state from this point; the parent reads it via
+  // bodyRef.current.getContent() at submit time, and pushes updates back
+  // via bodyRef.current.setContent() when existingQCI loads asynchronously.
+  const initialContentValue = existingQCI?.content.content
+    ? getContentWithoutTransactions(existingQCI.content.content)
+    : importedData?.content || initialContent || "";
   const [implementor, setImplementor] = useState(
     existingQCI?.content.implementor || importedData?.implementor || initialImplementor || "None"
   );
@@ -92,6 +281,18 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [preview, setPreview] = useState(false);
+
+  // Subscribe the preview block to body content changes ONLY while preview
+  // is open. This keeps typing fast in the default case (preview off, no
+  // parent re-renders per keystroke). When preview is on, the parent does
+  // re-render per keystroke so ReactMarkdown stays current — that's the
+  // acknowledged tradeoff and only happens when the user has explicitly
+  // opted into the slower preview view.
+  useEffect(() => {
+    if (!preview) return;
+    setPreviewContent(bodyRef.current?.getContent() ?? "");
+    return bodyRef.current?.subscribe(setPreviewContent);
+  }, [preview]);
   const [showTransactionModal, setShowTransactionModal] = useState(false);
   const [transactions, setTransactions] = useState<TransactionData[]>([]);
   const [editingTransactionIndex, setEditingTransactionIndex] = useState<number | null>(null);
@@ -125,42 +326,38 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
     }),
     [combooxSelectedChain, author, implementor, existingImplementationDate, existingCreated]
   );
-  // Defer the per-keystroke `content` value so the textarea stays responsive
-  // while the formatProposalBody projections (regex strips, string concat,
-  // tx serialization) run at a lower priority. React keeps the input
-  // urgent; the counter "catches up" between keystrokes. The submit-time
-  // gate in handleSubmit recomputes against the urgent `content` so a fast
-  // typist can't slip an over-limit save through during the deferred lag.
-  const deferredContent = useDeferredValue(content);
-  const projectedEmbeddedBody = useMemo(
-    () => formatProposalBody(deferredContent, editorFrontmatter, serializedTxsForCounter),
-    [deferredContent, editorFrontmatter, serializedTxsForCounter]
-  );
-  // Body without the transactions section — used to compute the tx-only
-  // char contribution so the editor can show "Transactions: +N chars" next
-  // to the Transactions header. Avoids the user wondering where the bulk
-  // of the body length is coming from when txs are collapsed into "N
-  // transactions" in the UI.
-  const projectedBodyWithoutTxs = useMemo(
-    () => formatProposalBody(deferredContent, editorFrontmatter, undefined),
-    [deferredContent, editorFrontmatter]
-  );
-  // Empty-content baseline so we can attribute the YAML-frontmatter overhead
-  // separately in the breakdown tooltip. formatProposalBody is additive
-  // (frontmatter + "\n\n" + content + tx-block), so the three deltas sum to
-  // the total body length.
-  const projectedBodyFrontmatterOnly = useMemo(
-    () => formatProposalBody("", editorFrontmatter, undefined),
-    [editorFrontmatter]
-  );
-  const editorBodyLength = projectedEmbeddedBody.length;
-  const frontmatterChars = projectedBodyFrontmatterOnly.length;
-  const contentChars = projectedBodyWithoutTxs.length - projectedBodyFrontmatterOnly.length;
-  const txCharContribution = projectedEmbeddedBody.length - projectedBodyWithoutTxs.length;
+  // Content state lives inside <SnapshotBodySection>; the parent reads it
+  // imperatively via this ref at submit time. This prevents the parent
+  // (and its other children — ChainCombobox, Transactions section,
+  // TransactionFormatter modal, Radix slot primitives) from re-rendering
+  // on every keystroke. React Scan profile confirmed those non-content
+  // children were costing 1-3ms each per keystroke; isolating the
+  // textarea cuts the per-frame work to just the body section's subtree.
+  const bodyRef = useRef<SnapshotBodySectionHandle>(null);
+  const [isContentOverLimit, setIsContentOverLimit] = useState(false);
+  const handleOverLimitChange = useCallback((over: boolean) => {
+    setIsContentOverLimit(over);
+  }, []);
+
+  // Live content mirror for the rich preview block ONLY. We subscribe to the
+  // body section's content updates while the preview is open, and unsubscribe
+  // when it closes. When preview is off, no subscription is active and
+  // typing in the textarea never re-renders this parent.
+  const [previewContent, setPreviewContent] = useState("");
+
   const editorBodyLimit = config.snapshotBodyLimitDefault;
-  const editorOverLimit = editorBodyLength > editorBodyLimit;
-  const editorNearLimit =
-    !editorOverLimit && editorBodyLength >= Math.floor(editorBodyLimit * SNAPSHOT_BODY_WARNING_RATIO);
+
+  // Tx-contribution badge for the Transactions section header. Computed
+  // without `content` because the JSON tx block in formatProposalBody is
+  // content-independent: the difference between with-txs and without-txs
+  // bodies on an empty content cancels out the YAML and leaves the pure
+  // tx-block contribution. Updates only when txs or frontmatter change,
+  // not per keystroke.
+  const txCharContribution = useMemo(() => {
+    const withTxs = formatProposalBody("", editorFrontmatter, serializedTxsForCounter);
+    const withoutTxs = formatProposalBody("", editorFrontmatter, undefined);
+    return withTxs.length - withoutTxs.length;
+  }, [editorFrontmatter, serializedTxsForCounter]);
 
   // Initialize transactions from existing QCI content
   useEffect(() => {
@@ -241,11 +438,10 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
 
       // A QCI saved over the Snapshot body limit can never be submitted to
       // Snapshot — block save here so we don't write wasted content to IPFS
-      // + the registry. Recompute against the URGENT `content` value (not
-      // the deferred projection driving the visual counter) so a fast
-      // typist can't slip an over-limit save through during the deferred
-      // catch-up window. The submitter has its own authoritative gate, but
-      // catching it here is the kinder UX.
+      // + the registry. Read the URGENT content via the body section's ref
+      // (the child's display counter uses useDeferredValue and can lag); a
+      // fast typist who clicks Save during that lag must still get gated.
+      const content = bodyRef.current?.getContent() ?? "";
       const freshBody = formatProposalBody(content, editorFrontmatter, serializedTxsForCounter);
       if (freshBody.length > editorBodyLimit) {
         setError(
@@ -329,7 +525,7 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
         // Reset form only for new QCIs that don't redirect
         if (!existingQCI && qciNumber === 0n) {
           setTitle("");
-          setContent("");
+          bodyRef.current?.setContent("");
           setImplementor("None");
         }
       } catch (err: any) {
@@ -344,7 +540,7 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
         setSaving(false);
       }
     },
-    [address, title, combooxSelectedChain, content, implementor, existingQCI, transactions, author, createQCIMutation, updateQCIMutation, navigate, editorFrontmatter, serializedTxsForCounter, editorBodyLimit]
+    [address, title, combooxSelectedChain, implementor, existingQCI, transactions, author, createQCIMutation, updateQCIMutation, navigate, editorFrontmatter, serializedTxsForCounter, editorBodyLimit]
   );
 
   const handlePreview = () => {
@@ -445,85 +641,14 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
           />
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="content">Proposal Content (Markdown) *</Label>
-          <Textarea
-            id="content"
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            required
-            rows={20}
-            className="font-mono text-sm"
-            placeholder={`## Summary
-
-Brief overview of your proposal...
-
-## Abstract
-
-Detailed explanation...
-
-## Rationale
-
-Why this proposal is needed...
-
-## Technical Specification
-
-Implementation details...`}
-          />
-          <div className="flex items-center justify-end gap-1.5">
-            <span
-              className={`text-xs ${
-                editorOverLimit
-                  ? "text-destructive"
-                  : editorNearLimit
-                  ? "text-amber-600 dark:text-amber-400"
-                  : "text-muted-foreground"
-              }`}
-              aria-live="polite"
-              title="Advisory projection — final count is checked at Snapshot submit."
-            >
-              Snapshot body: {editorBodyLength.toLocaleString()} / {editorBodyLimit.toLocaleString()} chars
-              {editorOverLimit && " — over Snapshot limit"}
-            </span>
-            <TooltipProvider delayDuration={150}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label="Snapshot body character breakdown"
-                    className="text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <Info className="h-3.5 w-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top" align="end" className="max-w-xs">
-                  <div className="space-y-1.5">
-                    <div className="font-semibold">Snapshot body breakdown</div>
-                    <div className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-0.5 text-xs">
-                      <span>YAML frontmatter</span>
-                      <span className="text-right tabular-nums">{frontmatterChars.toLocaleString()}</span>
-                      <span>Proposal content</span>
-                      <span className="text-right tabular-nums">{contentChars.toLocaleString()}</span>
-                      {txCharContribution > 0 && (
-                        <>
-                          <span>Transactions block</span>
-                          <span className="text-right tabular-nums">{txCharContribution.toLocaleString()}</span>
-                        </>
-                      )}
-                      <span className="border-t border-primary-foreground/20 pt-0.5 font-medium">Total</span>
-                      <span className="border-t border-primary-foreground/20 pt-0.5 text-right font-medium tabular-nums">
-                        {editorBodyLength.toLocaleString()} / {editorBodyLimit.toLocaleString()}
-                      </span>
-                    </div>
-                    <div className="pt-1 text-[10px] opacity-80">
-                      Frontmatter and transactions are emitted by the Snapshot serializer in addition to your markdown content. Advisory projection — the submitter does the final check.
-                    </div>
-                  </div>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </div>
-        </div>
+        <SnapshotBodySection
+          ref={bodyRef}
+          initialContent={initialContentValue}
+          frontmatter={editorFrontmatter}
+          serializedTxs={serializedTxsForCounter}
+          bodyLimit={editorBodyLimit}
+          onOverLimitChange={handleOverLimitChange}
+        />
 
         {/* Transactions Section */}
         <div className="space-y-2">
@@ -569,11 +694,11 @@ Implementation details...`}
         </div>
 
         <div className="flex space-x-4">
-          <Button type="submit" disabled={saving || editorOverLimit} variant="gradient-primary" size="lg">
+          <Button type="submit" disabled={saving || isContentOverLimit} variant="gradient-primary" size="lg">
             {saving
               ? "Saving..."
-              : editorOverLimit
-              ? `Body over Snapshot limit (${editorBodyLength.toLocaleString()} / ${editorBodyLimit.toLocaleString()})`
+              : isContentOverLimit
+              ? `Body over Snapshot limit (${editorBodyLimit.toLocaleString()})`
               : existingQCI
               ? "Update QCI"
               : "Create QCI"}
@@ -594,7 +719,7 @@ Implementation details...`}
               <span>Chain: {combooxSelectedChain}</span> •<span> Author: {author || address}</span> •<span> Status: Draft</span>
             </div>
             <div className="prose dark:prose-invert max-w-none">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{previewContent}</ReactMarkdown>
             </div>
 
             {/* Show transactions in preview */}
