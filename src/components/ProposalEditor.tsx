@@ -207,6 +207,17 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
         return;
       }
 
+      // A QCI saved over the Snapshot body limit can never be submitted to
+      // Snapshot — block save here so we don't write wasted content to IPFS
+      // + the registry. The submitter has the same gate, but catching it at
+      // editor save is the kinder UX.
+      if (editorOverLimit) {
+        setError(
+          `Proposal body is ${editorBodyLength.toLocaleString()} chars — over Snapshot's ${editorBodyLimit.toLocaleString()}-char limit. Shorten before saving.`
+        );
+        return;
+      }
+
       setError(null);
       setSuccess(null);
       setSaving(true);
@@ -297,7 +308,7 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
         setSaving(false);
       }
     },
-    [address, title, combooxSelectedChain, content, implementor, existingQCI, transactions, author, createQCIMutation, updateQCIMutation, navigate]
+    [address, title, combooxSelectedChain, content, implementor, existingQCI, transactions, author, createQCIMutation, updateQCIMutation, navigate, editorOverLimit, editorBodyLength, editorBodyLimit]
   );
 
   const handlePreview = () => {
@@ -473,8 +484,14 @@ Implementation details...`}
         </div>
 
         <div className="flex space-x-4">
-          <Button type="submit" disabled={saving} variant="gradient-primary" size="lg">
-            {saving ? "Saving..." : existingQCI ? "Update QCI" : "Create QCI"}
+          <Button type="submit" disabled={saving || editorOverLimit} variant="gradient-primary" size="lg">
+            {saving
+              ? "Saving..."
+              : editorOverLimit
+              ? `Body over Snapshot limit (${editorBodyLength.toLocaleString()} / ${editorBodyLimit.toLocaleString()})`
+              : existingQCI
+              ? "Update QCI"
+              : "Create QCI"}
           </Button>
 
           <Button type="button" onClick={handlePreview} variant="outline" size="lg">
