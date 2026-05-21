@@ -114,17 +114,31 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
   );
   const existingImplementationDate = existingQCI?.content["implementation-date"];
   const existingCreated = existingQCI?.content.created;
-  const projectedEmbeddedBody = useMemo(() => {
-    const frontmatter = {
+  const editorFrontmatter = useMemo(
+    () => ({
       chain: combooxSelectedChain,
       author: author || "",
       implementor,
       "implementation-date": existingImplementationDate || "None",
       created: existingCreated || new Date().toISOString().split("T")[0],
-    };
-    return formatProposalBody(content, frontmatter, serializedTxsForCounter);
-  }, [content, combooxSelectedChain, author, implementor, existingImplementationDate, existingCreated, serializedTxsForCounter]);
+    }),
+    [combooxSelectedChain, author, implementor, existingImplementationDate, existingCreated]
+  );
+  const projectedEmbeddedBody = useMemo(
+    () => formatProposalBody(content, editorFrontmatter, serializedTxsForCounter),
+    [content, editorFrontmatter, serializedTxsForCounter]
+  );
+  // Body without the transactions section — used to compute the tx-only
+  // char contribution so the editor can show "Transactions: +N chars" next
+  // to the Transactions header. Avoids the user wondering where the bulk
+  // of the body length is coming from when txs are collapsed into "N
+  // transactions" in the UI.
+  const projectedBodyWithoutTxs = useMemo(
+    () => formatProposalBody(content, editorFrontmatter, undefined),
+    [content, editorFrontmatter]
+  );
   const editorBodyLength = projectedEmbeddedBody.length;
+  const txCharContribution = projectedEmbeddedBody.length - projectedBodyWithoutTxs.length;
   const editorBodyLimit = config.snapshotBodyLimitDefault;
   const editorOverLimit = editorBodyLength > editorBodyLimit;
   const editorNearLimit =
@@ -453,7 +467,17 @@ Implementation details...`}
         {/* Transactions Section */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <Label>Transactions</Label>
+            <div className="flex items-baseline gap-2">
+              <Label>Transactions</Label>
+              {transactions.length > 0 && (
+                <span
+                  className="text-xs text-muted-foreground"
+                  title="Characters this transactions block contributes to the Snapshot body — when offload mode lands in PR-B, this is the bulk that gets reclaimed."
+                >
+                  +{txCharContribution.toLocaleString()} chars to Snapshot body
+                </span>
+              )}
+            </div>
             <Button
               type="button"
               onClick={() => {
