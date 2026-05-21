@@ -132,6 +132,11 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
     );
     setStatusLevel("info");
 
+    // Hoisted so the catch block can read the actual sent body when
+    // classifying server errors (not the stale render-time projection).
+    // Undefined if an error fires before the body is built.
+    let wireBody: string | undefined;
+
     try {
       // Refetch to ensure we have the latest QIP number
       await refetchQipNumber();
@@ -164,7 +169,7 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
       // Recompute the wire body after refetchQipNumber — a digit-count
       // rollover (999 → 1000) adds one character to the title and can push
       // the body over the limit since the render-time projection.
-      const wireBody = formatProposalBody(rawMarkdown, frontmatter, transactions);
+      wireBody = formatProposalBody(rawMarkdown, frontmatter, transactions);
       if (wireBody.length > bodyLimit) {
         setBodyTooLongError({ delivered: wireBody.length, limit: bodyLimit });
         setStatus(null);
@@ -257,13 +262,22 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
       const status = typeof e.status === "number" ? e.status : typeof e.statusCode === "number" ? e.statusCode : undefined;
       const isHttp4xx = typeof status === "number" && status >= 400 && status < 500;
 
+      // Prefer the actually-sent body length when available — projectedBody
+      // could be stale if frontmatter mutated between submit-click and catch.
+      const deliveredLength = wireBody !== undefined ? wireBody.length : projectedBody.length;
+
       if (lengthMatch) {
         const serverLimit = parseInt(lengthMatch[1], 10) || bodyLimit;
-        setBodyTooLongError({ delivered: projectedBody.length, limit: serverLimit });
+        setBodyTooLongError({ delivered: deliveredLength, limit: serverLimit });
         setStatus(null);
         setStatusLevel(null);
-      } else if (isClientError && isHttp4xx && projectedBody.length > bodyLimit) {
-        setBodyTooLongError({ delivered: projectedBody.length, limit: bodyLimit });
+      } else if (isClientError && isHttp4xx && wireBody !== undefined && wireBody.length > bodyLimit) {
+        // Heuristic fallback only fires when the body we ACTUALLY SENT was
+        // over the limit — using projectedBody here would mis-classify
+        // unrelated client errors (invalid space, bad timestamp, duplicate
+        // proposal) as "body too long" whenever the user had an over-limit
+        // draft visible in the editor.
+        setBodyTooLongError({ delivered: wireBody.length, limit: bodyLimit });
         setStatus(null);
         setStatusLevel(null);
       } else if (e.error && e.error_description) {
