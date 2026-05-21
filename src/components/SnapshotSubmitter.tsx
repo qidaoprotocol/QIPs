@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useEthersSigner } from "../utils/ethers";
 import { createProposal } from "../utils/snapshotClient";
 import { Proposal } from "@snapshot-labs/snapshot.js/dist/src/sign/types";
@@ -8,6 +8,7 @@ import { config } from "../config";
 import { Card, CardContent, CardFooter } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
+import { Alert, AlertDescription } from "./ui/alert";
 import { AlertCircle, CheckCircle2, ExternalLink, Loader2 } from "lucide-react";
 import { base, mainnet } from "wagmi/chains";
 import { useLinkSnapshotProposal } from "../hooks/useLinkSnapshotProposal";
@@ -15,6 +16,28 @@ import { getLatestQipNumber } from "../utils/snapshotClient";
 import { useQITokenBalance } from "../hooks/useQITokenBalance";
 import { ChainSwitchRejectedError, useEnsureChain } from "../hooks/useEnsureChain";
 import { formatProposalBody } from "../utils/snapshotPayload";
+
+// Warning threshold: render the counter in amber when the projected body
+// reaches 80% of the limit. Below the threshold the counter stays muted;
+// above the limit it turns destructive (red) and the submit button locks.
+// Mirrors the canonical pattern from Comments/CommentComposer.tsx — the
+// only difference is the unit (characters here, UTF-8 bytes there) because
+// the Snapshot Sequencer gates on `body.length`, while the comments backend
+// gates on byte length.
+const WARNING_RATIO = 0.8;
+
+/**
+ * Structured local error type for Snapshot body-too-long rejections. Produced
+ * by the two-tier match in handleSubmit (primary regex on the Sequencer's
+ * `error_description`, plus a status+error-code heuristic that catches the
+ * same condition even if Snapshot drifts the error wording). Surfaces in the
+ * UI as a destructive Alert with the delivered/limit numbers so the user can
+ * shorten and retry.
+ */
+interface SnapshotBodyTooLongError {
+  delivered: number;
+  limit: number;
+}
 
 interface SnapshotSubmitterProps {
   frontmatter: any;
@@ -50,6 +73,7 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
   const [proposalId, setProposalId] = useState<string | null>(null);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [statusLevel, setStatusLevel] = useState<"info" | "success" | "error" | null>(null);
+  const [bodyTooLongError, setBodyTooLongError] = useState<SnapshotBodyTooLongError | null>(null);
 
   // Mutation hook for linking snapshot proposals
   const linkSnapshotMutation = useLinkSnapshotProposal({
@@ -89,12 +113,48 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
     return undefined;
   };
 
+  // Authoritative Snapshot body projection — the same string that goes on the
+  // wire if the user submits right now. R2 requires this counter to measure
+  // the wire payload, not the raw markdown, so we route through the shared
+  // serializer (R8 / Key Technical Decisions: single shared serializer). The
+  // counter and the actual snapshot.proposal() call both call this exact
+  // function; no parallel size-accounting path exists.
+  //
+  // `body.length` is UTF-16 code units — matches the Sequencer's
+  // `msg.payload.body.length` check, NOT UTF-8 bytes. Per R6.
+  const projectedBody = useMemo(
+    () => formatProposalBody(rawMarkdown, frontmatter, extractTransactions()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- extractTransactions reads from frontmatter
+    [rawMarkdown, frontmatter]
+  );
+  const bodyLength = projectedBody.length;
+  // qidao.eth lives in the "verified" bucket per the live GraphQL Settings
+  // query (verified=true, turbo=false). U7 (deferred) will hydrate this
+  // dynamically; for now the active limit is the default-bucket value.
+  const bodyLimit = config.snapshotBodyLimitDefault;
+  const overLimit = bodyLength > bodyLimit;
+  const nearLimit = !overLimit && bodyLength >= Math.floor(bodyLimit * WARNING_RATIO);
+
   const handleSubmit = async () => {
     if (!signer) {
       setStatus("Please connect your wallet first.");
       setStatusLevel("info");
       return;
     }
+
+    // Defensive: the submit button is also disabled when overLimit is true,
+    // but a parallel-state race (memo not yet flushed after a frontmatter
+    // mutation) could let a click through. Recompute and abort before any
+    // network or signature work fires.
+    if (projectedBody.length > bodyLimit) {
+      setBodyTooLongError({ delivered: projectedBody.length, limit: bodyLimit });
+      setStatus(null);
+      setStatusLevel(null);
+      return;
+    }
+
+    // Clear any prior structured body-too-long error from a previous attempt.
+    setBodyTooLongError(null);
     setLoading(true);
     setStatus(
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -133,11 +193,27 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
       // Extract transactions for the body
       const transactions = extractTransactions();
 
+      // Build the FINAL wire body using the now-refreshed QIP number. The
+      // earlier projectedBody memo used the render-time QIP number; if
+      // refetchQipNumber rolled the digit count over (999 → 1000), the
+      // title string grew by one character and the projected length is
+      // stale. Recompute from the same single shared serializer and
+      // abort BEFORE signature if the recomputed length now exceeds the
+      // limit. This is the parallel-read-path-safe gate site.
+      const wireBody = formatProposalBody(rawMarkdown, frontmatter, transactions);
+      if (wireBody.length > bodyLimit) {
+        setBodyTooLongError({ delivered: wireBody.length, limit: bodyLimit });
+        setStatus(null);
+        setStatusLevel(null);
+        setLoading(false);
+        return;
+      }
+
       const proposalOptions: Proposal = {
         space,
         type: "basic",
         title: qipTitle,
-        body: formatProposalBody(rawMarkdown, frontmatter, transactions),
+        body: wireBody,
         choices: ["For", "Against", "Abstain"],
         start: now + startOffset,
         end: now + endOffset,
@@ -203,14 +279,60 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
       }
     } catch (e: any) {
       console.error("Snapshot submission error:", e);
-      if (e.error && e.error_description) {
+
+      // Two-tier body-too-long detection.
+      //
+      // Primary: regex on the Sequencer's `error_description` field. The
+      // Sequencer's writer (snapshot-labs/sx-monorepo/apps/sequencer/src/
+      // writer/proposal.ts) returns the exact string
+      // "proposal body length can not exceed N characters" today, but treat
+      // upstream wording as drift-prone — Snapshot is an external dependency
+      // we don't version against.
+      //
+      // Secondary: if `error_description` is missing or the regex doesn't
+      // match but the response is shaped like a Sequencer client-side
+      // rejection (HTTP 4xx + `error === "client_error"`), AND the wire
+      // body we built locally exceeded the configured limit, surface the
+      // same structured CTA using the local limit as the assumed bound.
+      // The wire body length isn't available here — we re-derive it from
+      // the now-stale projectedBody, which is close enough for an
+      // assumed-limit display.
+      //
+      // Both paths read defensively: try error_description first, fall
+      // through to error.message, then to a stringified fallback.
+      const errorString: string =
+        (typeof e.error_description === "string" && e.error_description) ||
+        (typeof e.message === "string" && e.message) ||
+        (e !== null && e !== undefined ? String(e) : "");
+      const lengthMatch = errorString.match(/proposal body length can not exceed (\d+) characters/i);
+
+      const isClientError = typeof e.error === "string" && e.error === "client_error";
+      const status = typeof e.status === "number" ? e.status : typeof e.statusCode === "number" ? e.statusCode : undefined;
+      const isHttp4xx = typeof status === "number" && status >= 400 && status < 500;
+
+      if (lengthMatch) {
+        // Primary match: extract the server-reported limit verbatim.
+        const serverLimit = parseInt(lengthMatch[1], 10) || bodyLimit;
+        setBodyTooLongError({ delivered: projectedBody.length, limit: serverLimit });
+        setStatus(null);
+        setStatusLevel(null);
+      } else if (isClientError && isHttp4xx && projectedBody.length > bodyLimit) {
+        // Heuristic fallback: a Sequencer client-error with a 4xx status
+        // and a body we know to be over the local limit — same condition,
+        // just different wording.
+        setBodyTooLongError({ delivered: projectedBody.length, limit: bodyLimit });
+        setStatus(null);
+        setStatusLevel(null);
+      } else if (e.error && e.error_description) {
         setStatus(`Error: ${e.error_description}`);
+        setStatusLevel("error");
       } else if (e.code === "ACTION_REJECTED" || e.code === 4001) {
         setStatus("Transaction cancelled by user");
+        setStatusLevel("error");
       } else {
         setStatus(`Error: ${e.message || "Failed to create proposal. Please try again."}`);
+        setStatusLevel("error");
       }
-      setStatusLevel("error");
     } finally {
       setLoading(false);
     }
@@ -356,6 +478,45 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
           </div>
         )}
 
+        {/* Body-too-long structured error. Renders when the Snapshot
+            Sequencer rejected the submission with a body-length error
+            (primary regex match) or when the heuristic fallback fires.
+            PR-B will extend this with an "Enable IPFS offload" CTA button;
+            for now the message gives the user the limit info so they can
+            shorten and retry. */}
+        {bodyTooLongError && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              Snapshot rejected this body as too long (delivered{" "}
+              {bodyTooLongError.delivered.toLocaleString()} chars, limit{" "}
+              {bodyTooLongError.limit.toLocaleString()}). Shorten the title or proposal body and retry.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Live character counter — measures the authoritative wire payload
+            (the same string handleSubmit will send) via formatProposalBody.
+            Hidden when the QIP number is still loading because the projected
+            length depends on the QIP number in the title. */}
+        {!isLoadingQipNumber && (
+          <div className="flex items-center justify-between text-xs">
+            <span
+              className={
+                overLimit
+                  ? "text-destructive"
+                  : nearLimit
+                  ? "text-amber-600 dark:text-amber-400"
+                  : "text-muted-foreground"
+              }
+              aria-live="polite"
+            >
+              Snapshot body: {bodyLength.toLocaleString()} / {bodyLimit.toLocaleString()} chars
+              {overLimit && " — too long"}
+            </span>
+          </div>
+        )}
+
         {/* Prerequisites Info */}
         {signer && requiresTokenBalance && tokenBalance >= requiredBalance && (
           <div className="space-y-2">
@@ -404,7 +565,11 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
         <Button
           onClick={handleSubmit}
           disabled={
-            !signer || (requiresTokenBalance && tokenBalance < requiredBalance) || loading || (requiresTokenBalance && checkingBalance)
+            !signer ||
+            (requiresTokenBalance && tokenBalance < requiredBalance) ||
+            loading ||
+            (requiresTokenBalance && checkingBalance) ||
+            overLimit
           }
           className="w-full"
           size="xl"
@@ -418,6 +583,8 @@ const SnapshotSubmitter: React.FC<SnapshotSubmitterProps> = ({
             ? "Connect Wallet"
             : requiresTokenBalance && tokenBalance < requiredBalance
             ? `Insufficient Balance (${tokenBalance.toLocaleString()} / ${requiredBalance.toLocaleString()} required)`
+            : overLimit
+            ? `Body too long (${bodyLength.toLocaleString()} / ${bodyLimit.toLocaleString()} chars)`
             : isTestMode
             ? `Submit Test QIP to ${SNAPSHOT_SPACE}`
             : `Submit QIP to ${SNAPSHOT_SPACE}`}
