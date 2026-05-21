@@ -113,6 +113,39 @@ export function parseTransactionsFromContent(content: string): TransactionData[]
 }
 
 /**
+ * Serialize an array of TransactionData[] into the JSON string shape that
+ * downstream consumers expect — both `IPFSService.formatQCIContent` (at QCI
+ * save time) and `formatProposalBody` (at Snapshot submission, and again from
+ * the live counter in ProposalEditor + SnapshotSubmitter).
+ *
+ * Three call sites share this one transformation so the editor's projected
+ * character count, the on-IPFS pinned content, and the Snapshot wire payload
+ * all measure the same byte sequence. This is the transactions-side mirror of
+ * the single-shared-serializer Key Technical Decision in the QIPs char-limit
+ * plan; past parallel-read-path bugs in this codebase trace back to two
+ * paths that serialized "the same" data slightly differently and drifted.
+ *
+ * Returns `undefined` for an empty array so consumers can pass the result
+ * straight to `formatProposalBody(rawMarkdown, frontmatter, ?)` without
+ * branching on the length themselves.
+ */
+export function serializeTransactionsForBody(transactions: TransactionData[]): string | undefined {
+  if (transactions.length === 0) {
+    return undefined;
+  }
+
+  const transactionGroups = groupTransactionsByMultisig(transactions).map((group) => ({
+    multisig: group.multisig,
+    transactions: group.transactions.map((tx) => {
+      const formatted = ABIParser.formatTransaction(tx);
+      return JSON.parse(formatted);
+    }),
+  }));
+
+  return JSON.stringify(transactionGroups, null, 2);
+}
+
+/**
  * Group transactions by multisig address for storage/display
  * This is used when creating or updating QCIs
  */

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAccount, useWalletClient, useSwitchChain } from 'wagmi';
@@ -17,11 +17,18 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { TransactionFormatter } from "./TransactionFormatter";
 import { TransactionGroup } from "./TransactionGroup";
 import { type TransactionData, ABIParser } from "../utils/abiParser";
-import { groupTransactionsByMultisig } from "../utils/transactionParser";
+import { groupTransactionsByMultisig, serializeTransactionsForBody } from "../utils/transactionParser";
+import { formatProposalBody } from "../utils/snapshotPayload";
 import { Plus } from "lucide-react";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getAllChainNames } from '@/config/proposalChains';
+
+// Warning threshold for the advisory counter — render amber at 80% of the
+// limit, destructive (red) above the limit. Matches CommentComposer's
+// canonical pattern. Editor doesn't enforce; the hard gate lives in the
+// submitter. Tooltip on the counter explains the advisory nature.
+const EDITOR_BODY_WARNING_RATIO = 0.8;
 
 interface ProposalEditorProps {
   registryAddress: Address;
@@ -98,6 +105,35 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
   // Initialize mutation hooks
   const createQCIMutation = useCreateQCI({ registryAddress });
   const updateQCIMutation = useUpdateQCI({ registryAddress });
+
+  // Advisory projection of the Snapshot body the user is composing. Routes
+  // through the same shared serializer (formatProposalBody +
+  // serializeTransactionsForBody) the submitter uses at signature time —
+  // single shared serializer, no parallel size-accounting path. R3 calls
+  // for this counter as an early-feedback signal; the hard gate lives in
+  // SnapshotSubmitter so editing doesn't get blocked on a QCI save (which
+  // writes to IPFS + registry, neither of which has the Snapshot limit).
+  //
+  // Pessimistic in two small ways: when implementor / implementation-date
+  // are unset, we emit "None" so the frontmatter row is omitted (matching
+  // the submitter's behavior); and we fall back to today's date for
+  // created if no existing QCI is loaded.
+  const projectedEmbeddedBody = useMemo(() => {
+    const frontmatter = {
+      chain: combooxSelectedChain,
+      author: author || "",
+      implementor,
+      "implementation-date": existingQCI?.content["implementation-date"] || "None",
+      created: existingQCI?.content.created || new Date().toISOString().split("T")[0],
+    };
+    const serializedTxs = serializeTransactionsForBody(transactions);
+    return formatProposalBody(content, frontmatter, serializedTxs);
+  }, [content, combooxSelectedChain, author, implementor, existingQCI, transactions]);
+  const editorBodyLength = projectedEmbeddedBody.length;
+  const editorBodyLimit = config.snapshotBodyLimitDefault;
+  const editorOverLimit = editorBodyLength > editorBodyLimit;
+  const editorNearLimit =
+    !editorOverLimit && editorBodyLength >= Math.floor(editorBodyLimit * EDITOR_BODY_WARNING_RATIO);
 
   // Initialize transactions from existing QCI content
   useEffect(() => {
@@ -181,20 +217,11 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
       setSaving(true);
 
       try {
-        // Group transactions by multisig address
-        const transactionGroups = groupTransactionsByMultisig(transactions).map(group => ({
-          multisig: group.multisig,
-          transactions: group.transactions.map((tx) => {
-            // Parse the formatted transaction and add it back
-            const formatted = ABIParser.formatTransaction(tx);
-            return JSON.parse(formatted);
-          }),
-        }));
-
-        // Serialize transaction groups as string for QCIContent
-        const serializedTransactions = transactions.length > 0
-          ? JSON.stringify(transactionGroups, null, 2)
-          : undefined;
+        // Serialize transaction groups as a string for QCIContent. The same
+        // helper is used by the advisory counter below so the editor's
+        // projected Snapshot-body length matches what eventually goes on the
+        // wire — single shared serializer, no parallel path.
+        const serializedTransactions = serializeTransactionsForBody(transactions);
 
         // Create QCI content object
         const qciContent: QCIContent = {
@@ -401,6 +428,26 @@ Why this proposal is needed...
 
 Implementation details...`}
           />
+          {/* Advisory Snapshot-body counter — informational only, no gating.
+              Routes through the same shared serializer the submitter uses;
+              tooltip clarifies that the authoritative check happens at
+              Snapshot submission. */}
+          <div className="flex items-center justify-end text-xs">
+            <span
+              className={
+                editorOverLimit
+                  ? "text-destructive"
+                  : editorNearLimit
+                  ? "text-amber-600 dark:text-amber-400"
+                  : "text-muted-foreground"
+              }
+              aria-live="polite"
+              title="Advisory projection — final count is checked at Snapshot submit."
+            >
+              Snapshot body: {editorBodyLength.toLocaleString()} / {editorBodyLimit.toLocaleString()} chars
+              {editorOverLimit && " — over Snapshot limit"}
+            </span>
+          </div>
         </div>
 
         {/* Transactions Section */}
