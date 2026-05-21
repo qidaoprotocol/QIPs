@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo, useDeferredValue } from 'react';
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAccount, useWalletClient, useSwitchChain } from 'wagmi';
@@ -125,9 +125,16 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
     }),
     [combooxSelectedChain, author, implementor, existingImplementationDate, existingCreated]
   );
+  // Defer the per-keystroke `content` value so the textarea stays responsive
+  // while the formatProposalBody projections (regex strips, string concat,
+  // tx serialization) run at a lower priority. React keeps the input
+  // urgent; the counter "catches up" between keystrokes. The submit-time
+  // gate in handleSubmit recomputes against the urgent `content` so a fast
+  // typist can't slip an over-limit save through during the deferred lag.
+  const deferredContent = useDeferredValue(content);
   const projectedEmbeddedBody = useMemo(
-    () => formatProposalBody(content, editorFrontmatter, serializedTxsForCounter),
-    [content, editorFrontmatter, serializedTxsForCounter]
+    () => formatProposalBody(deferredContent, editorFrontmatter, serializedTxsForCounter),
+    [deferredContent, editorFrontmatter, serializedTxsForCounter]
   );
   // Body without the transactions section — used to compute the tx-only
   // char contribution so the editor can show "Transactions: +N chars" next
@@ -135,8 +142,8 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
   // of the body length is coming from when txs are collapsed into "N
   // transactions" in the UI.
   const projectedBodyWithoutTxs = useMemo(
-    () => formatProposalBody(content, editorFrontmatter, undefined),
-    [content, editorFrontmatter]
+    () => formatProposalBody(deferredContent, editorFrontmatter, undefined),
+    [deferredContent, editorFrontmatter]
   );
   // Empty-content baseline so we can attribute the YAML-frontmatter overhead
   // separately in the breakdown tooltip. formatProposalBody is additive
@@ -234,11 +241,15 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
 
       // A QCI saved over the Snapshot body limit can never be submitted to
       // Snapshot — block save here so we don't write wasted content to IPFS
-      // + the registry. The submitter has the same gate, but catching it at
-      // editor save is the kinder UX.
-      if (editorOverLimit) {
+      // + the registry. Recompute against the URGENT `content` value (not
+      // the deferred projection driving the visual counter) so a fast
+      // typist can't slip an over-limit save through during the deferred
+      // catch-up window. The submitter has its own authoritative gate, but
+      // catching it here is the kinder UX.
+      const freshBody = formatProposalBody(content, editorFrontmatter, serializedTxsForCounter);
+      if (freshBody.length > editorBodyLimit) {
         setError(
-          `Proposal body is ${editorBodyLength.toLocaleString()} chars — over Snapshot's ${editorBodyLimit.toLocaleString()}-char limit. Shorten before saving.`
+          `Proposal body is ${freshBody.length.toLocaleString()} chars — over Snapshot's ${editorBodyLimit.toLocaleString()}-char limit. Shorten before saving.`
         );
         return;
       }
@@ -333,7 +344,7 @@ export const ProposalEditor: React.FC<ProposalEditorProps> = ({
         setSaving(false);
       }
     },
-    [address, title, combooxSelectedChain, content, implementor, existingQCI, transactions, author, createQCIMutation, updateQCIMutation, navigate, editorOverLimit, editorBodyLength, editorBodyLimit]
+    [address, title, combooxSelectedChain, content, implementor, existingQCI, transactions, author, createQCIMutation, updateQCIMutation, navigate, editorFrontmatter, serializedTxsForCounter, editorBodyLimit]
   );
 
   const handlePreview = () => {
